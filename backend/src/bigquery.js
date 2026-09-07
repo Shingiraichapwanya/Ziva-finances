@@ -670,3 +670,158 @@ export async function getPerformanceSummary() {
   };
 }
 
+/**
+ * Get all debts from debt_credit_ledger
+ */
+export async function getDebts(statusFilter = null) {
+  let sql = `
+    SELECT 
+      id,
+      person_name,
+      direction,
+      amount,
+      currency,
+      CAST(date AS STRING) as date,
+      status,
+      notes,
+      created_at,
+      updated_at
+    FROM \`${BQ_CONFIG.projectId}.${BQ_CONFIG.datasetId}.debt_credit_ledger\`
+  `;
+  if (statusFilter) {
+    sql += ` WHERE status = '${statusFilter}'`;
+  }
+  sql += ` ORDER BY date DESC, created_at DESC`;
+  
+  const rows = await runQuery(sql);
+  return rows.map(r => ({
+    id: r.id,
+    personName: r.person_name,
+    direction: r.direction,
+    amount: parseFloat(r.amount || 0),
+    currency: r.currency || 'USD',
+    date: r.date,
+    status: r.status,
+    notes: r.notes || '',
+    createdAt: r.created_at,
+    updatedAt: r.updated_at
+  }));
+}
+
+/**
+ * Get aggregated balances per person from debt_credit_balances view
+ */
+export async function getDebtBalances(personName = null) {
+  let sql = `
+    SELECT 
+      person_name,
+      total_owed_to_me,
+      total_owed_by_me,
+      net_balance,
+      balance_direction
+    FROM \`${BQ_CONFIG.projectId}.${BQ_CONFIG.datasetId}.debt_credit_balances\`
+  `;
+  if (personName) {
+    const cleanName = personName.replace(/'/g, "\\'");
+    sql += ` WHERE person_name = '${cleanName}'`;
+  }
+  sql += ` ORDER BY ABS(net_balance) DESC`;
+
+  const rows = await runQuery(sql);
+  return rows.map(r => ({
+    personName: r.person_name,
+    totalOwedToMe: parseFloat(r.total_owed_to_me || 0),
+    totalOwedByMe: parseFloat(r.total_owed_by_me || 0),
+    netBalance: parseFloat(r.net_balance || 0),
+    balanceDirection: r.balance_direction
+  }));
+}
+
+/**
+ * Insert a new debt or credit entry into debt_credit_ledger
+ */
+export async function insertDebt(debtData) {
+  const debtId = debtData.id || `debt_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  const now = new Date().toISOString();
+  const dateStr = debtData.date || now.split('T')[0];
+
+  const record = {
+    id: debtId,
+    person_name: debtData.personName || debtData.person_name,
+    direction: debtData.direction === 'owed_by_me' ? 'owed_by_me' : 'owed_to_me',
+    amount: parseFloat(Number(debtData.amount).toFixed(4)),
+    currency: debtData.currency || 'USD',
+    date: dateStr,
+    status: debtData.status || 'Pending',
+    notes: debtData.notes || '',
+    created_at: now,
+    updated_at: now
+  };
+
+  const tempFilePath = path.join(__dirname, `debt_${debtId}.json`);
+  try {
+    fs.writeFileSync(tempFilePath, JSON.stringify(record) + '\n', 'utf8');
+    const loadCmd = `bq load --project_id=${BQ_CONFIG.projectId} --location=${BQ_CONFIG.location} --source_format=NEWLINE_DELIMITED_JSON --label datacloud:antigravity ${BQ_CONFIG.projectId}:${BQ_CONFIG.datasetId}.debt_credit_ledger "${tempFilePath}"`;
+    execSync(loadCmd, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+    return {
+      success: true,
+      debtId: debtId,
+      record: record
+    };
+  } finally {
+    if (fs.existsSync(tempFilePath)) {
+      try { fs.unlinkSync(tempFilePath); } catch (_) {}
+    }
+  }
+}
+
+/**
+ * Mark a debt entry as 'Settled'
+ */
+export async function settleDebt(debtId) {
+  if (!debtId || typeof debtId !== 'string') {
+    throw new Error('Invalid or missing debt ID');
+  }
+  const cleanId = debtId.replace(/[^a-zA-Z0-9_-]/g, '');
+  const now = new Date().toISOString();
+  
+  // Try DML UPDATE first
+  const updateSql = `
+    UPDATE \`${BQ_CONFIG.projectId}.${BQ_CONFIG.datasetId}.debt_credit_ledger\`
+    SET status = 'Settled', updated_at = CURRENT_TIMESTAMP()
+    WHERE id = '${cleanId}'
+  `;
+  try {
+    await runQuery(updateSql);
+  } catch (dmlErr) {
+    // If running in sandbox without billing, fetch all records, modify in-memory, and replace table
+    console.warn(`[BigQuery] DML UPDATE notice for ${cleanId}, executing sandbox reload:`, dmlErr.message);
+    const selectSql = `SELECT * FROM \`${BQ_CONFIG.projectId}.${BQ_CONFIG.datasetId}.debt_credit_ledger\``;
+    const allRows = await runQuery(selectSql);
+    const updatedRows = allRows.map(r => {
+      if (r.id === cleanId) {
+        return { ...r, status: 'Settled', updated_at: now };
+      }
+      return r;
+    });
+    const tempFile = path.join(__dirname, `debts_reload_${Date.now()}.json`);
+    try {
+      fs.writeFileSync(tempFile, updatedRows.map(r => JSON.stringify(r)).join('\n'), 'utf8');
+      const loadCmd = `bq load --replace --project_id=${BQ_CONFIG.projectId} --location=${BQ_CONFIG.location} --source_format=NEWLINE_DELIMITED_JSON --label datacloud:antigravity ${BQ_CONFIG.projectId}:${BQ_CONFIG.datasetId}.debt_credit_ledger "${tempFile}"`;
+      execSync(loadCmd, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+    } finally {
+      if (fs.existsSync(tempFile)) {
+        try { fs.unlinkSync(tempFile); } catch (_) {}
+      }
+    }
+  }
+
+  return {
+    success: true,
+    debtId: cleanId,
+    status: 'Settled',
+    updatedAt: now
+  };
+}
+
+

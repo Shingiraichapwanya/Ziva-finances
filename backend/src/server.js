@@ -19,7 +19,11 @@ import {
   deleteTransaction,
   getIncomeStatements,
   getNonOperatingGains,
-  getPerformanceSummary
+  getPerformanceSummary,
+  getDebts,
+  getDebtBalances,
+  insertDebt,
+  settleDebt
 } from './bigquery.js';
 import { getCopilotInsights, chatWithCopilot } from './copilot.js';
 
@@ -117,6 +121,50 @@ app.delete('/api/transactions/:id', async (req, res) => {
     res.json(result);
   } catch (error) {
     console.error(`Error deleting transaction ${req.params.id}:`, error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Debt & Credit Ledger endpoints
+app.get('/api/debts', async (req, res) => {
+  try {
+    const { status } = req.query;
+    const debts = await getDebts(status);
+    res.json(debts);
+  } catch (error) {
+    console.error('Error fetching debts:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/debts/balances', async (req, res) => {
+  try {
+    const { person } = req.query;
+    const balances = await getDebtBalances(person);
+    res.json(balances);
+  } catch (error) {
+    console.error('Error fetching debt balances:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/debts', async (req, res) => {
+  try {
+    const result = await insertDebt(req.body);
+    res.json(result);
+  } catch (error) {
+    console.error('Error creating debt record:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.patch('/api/debts/:id/settle', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await settleDebt(id);
+    res.json(result);
+  } catch (error) {
+    console.error(`Error settling debt ${req.params.id}:`, error);
     res.status(500).json({ error: error.message });
   }
 });

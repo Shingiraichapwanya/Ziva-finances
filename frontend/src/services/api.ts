@@ -197,6 +197,60 @@ export const financeApi = {
     const res = await fetch(`${API_BASE}/analytics/summary`, { signal: AbortSignal.timeout(20000) });
     if (!res.ok) throw new Error(`Failed to fetch analytics summary: ${res.statusText}`);
     return res.json();
+  },
+
+  /**
+   * Fetch all debt/credit ledger records
+   */
+  async getDebts(status?: string): Promise<any[]> {
+    const query = status ? `?status=${status}` : '';
+    const res = await fetch(`${API_BASE}/debts${query}`, { signal: AbortSignal.timeout(12000) });
+    if (!res.ok) throw new Error(`Failed to fetch debts: ${res.statusText}`);
+    return res.json();
+  },
+
+  /**
+   * Fetch net debt/credit balances summarized per person
+   */
+  async getDebtBalances(person?: string): Promise<any[]> {
+    const query = person ? `?person=${encodeURIComponent(person)}` : '';
+    const res = await fetch(`${API_BASE}/debts/balances${query}`, { signal: AbortSignal.timeout(12000) });
+    if (!res.ok) throw new Error(`Failed to fetch debt balances: ${res.statusText}`);
+    return res.json();
+  },
+
+  /**
+   * Create a new debt or credit entry
+   */
+  async createDebt(debtData: {
+    personName: string;
+    direction: 'owed_to_me' | 'owed_by_me';
+    amount: number;
+    currency?: string;
+    date?: string;
+    notes?: string;
+  }): Promise<{ success: boolean; debtId: string }> {
+    const res = await fetch(`${API_BASE}/debts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(debtData),
+      signal: AbortSignal.timeout(15000)
+    });
+    if (!res.ok) throw new Error(`Failed to create debt record: ${res.statusText}`);
+    return res.json();
+  },
+
+  /**
+   * Mark a debt entry as Settled
+   */
+  async settleDebt(id: string): Promise<{ success: boolean; debtId: string; status: string }> {
+    const res = await fetch(`${API_BASE}/debts/${id}/settle`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(15000)
+    });
+    if (!res.ok) throw new Error(`Failed to settle debt: ${res.statusText}`);
+    return res.json();
   }
 };
 

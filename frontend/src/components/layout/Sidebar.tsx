@@ -3,6 +3,7 @@ import {
   LayoutDashboard,
   WalletCards,
   ReceiptText,
+  Handshake,
   PieChart,
   Landmark,
   Gem,
@@ -10,7 +11,7 @@ import {
   Settings
 } from 'lucide-react';
 
-export type NavTab = 'dashboard' | 'accounts' | 'ledger' | 'budgets' | 'tax' | 'wealth' | 'analytics' | 'settings';
+export type NavTab = 'dashboard' | 'accounts' | 'ledger' | 'debts' | 'budgets' | 'tax' | 'wealth' | 'analytics' | 'settings';
 
 interface SidebarProps {
   currentTab: NavTab;
@@ -22,6 +23,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentTab, onSelectTab }) => 
     { id: 'dashboard' as NavTab, label: 'Dashboard', icon: LayoutDashboard },
     { id: 'accounts' as NavTab, label: 'Accounts & Tiers', icon: WalletCards },
     { id: 'ledger' as NavTab, label: 'Transactions', icon: ReceiptText },
+    { id: 'debts' as NavTab, label: 'Debt & Credit Ledger', icon: Handshake },
     { id: 'budgets' as NavTab, label: 'Zero-Based Budgets', icon: PieChart },
     { id: 'tax' as NavTab, label: 'Tax & Compliance', icon: Landmark },
     { id: 'wealth' as NavTab, label: 'Wealth Suite', icon: Gem, highlight: true },

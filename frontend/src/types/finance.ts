@@ -254,3 +254,28 @@ export interface PerformanceSummary {
   nonOperatingGains: NonOperatingGainRecord[];
 }
 
+export type DebtDirection = 'owed_to_me' | 'owed_by_me';
+export type DebtStatus = 'Pending' | 'Settled';
+
+export interface DebtRecord {
+  id: string;
+  personName: string;
+  direction: DebtDirection;
+  amount: number;
+  currency: string;
+  date: string;
+  status: DebtStatus;
+  notes: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DebtBalance {
+  personName: string;
+  totalOwedToMe: number;
+  totalOwedByMe: number;
+  netBalance: number;
+  balanceDirection: 'they_owe_me' | 'i_owe_them' | 'settled_or_zero';
+}
+
+

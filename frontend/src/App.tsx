@@ -6,6 +6,7 @@ import { Sidebar, NavTab } from './components/layout/Sidebar';
 import { DashboardView } from './components/dashboard/DashboardView';
 import { AccountsView } from './components/accounts/AccountsView';
 import { TransactionsView } from './components/ledger/TransactionsView';
+import { DebtLedgerView } from './components/debts/DebtLedgerView';
 import { BudgetsView } from './components/budgets/BudgetsView';
 import { TaxView } from './components/tax/TaxView';
 import { WealthManagementView } from './components/wealth/WealthManagementView';
@@ -219,6 +220,12 @@ export function App() {
               masterCurrency={masterCurrency}
               rates={rates}
               onAddTransaction={handleAddTransaction}
+            />
+          )}
+
+          {currentTab === 'debts' && (
+            <DebtLedgerView
+              masterCurrency={masterCurrency}
             />
           )}
 
