@@ -16,10 +16,16 @@ import 'widgets/analytics_hub_section.dart';
 import 'widgets/asset_summary_widget.dart';
 import 'widgets/debt_credit_summary_widget.dart';
 import 'widgets/envelope_overview_section.dart';
+import 'widgets/next_best_move_widget.dart';
+import 'widgets/scenario_snapshot_widget.dart';
+import 'widgets/tax_reserve_status_widget.dart';
 
 class DashboardScreen extends StatefulWidget {
   final VoidCallback onNavigateToLedger;
   final VoidCallback? onNavigateToAssets;
+  final VoidCallback? onNavigateToScenarios;
+  final VoidCallback? onNavigateToTax;
+  final VoidCallback? onNavigateToGoals;
   final VoidCallback? onNavigateToSettings;
   final bool showSidebar;
   final String selectedCurrency;
@@ -28,6 +34,9 @@ class DashboardScreen extends StatefulWidget {
     super.key,
     required this.onNavigateToLedger,
     this.onNavigateToAssets,
+    this.onNavigateToScenarios,
+    this.onNavigateToTax,
+    this.onNavigateToGoals,
     this.onNavigateToSettings,
     this.showSidebar = true,
     this.selectedCurrency = 'ZAR',
@@ -338,7 +347,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 onTap: () => GlobalSearchDialog.show(context, onNavigateToTab: (idx) {
                   if (idx == 1 && widget.onNavigateToAssets != null) widget.onNavigateToAssets!();
                   if (idx == 2) widget.onNavigateToLedger();
-                  if (idx == 3 && widget.onNavigateToSettings != null) widget.onNavigateToSettings!();
+                  if (idx == 3 && widget.onNavigateToScenarios != null) widget.onNavigateToScenarios!();
+                  if (idx == 4 && widget.onNavigateToTax != null) widget.onNavigateToTax!();
+                  if (idx == 5 && widget.onNavigateToGoals != null) widget.onNavigateToGoals!();
+                  if (idx == 6 && widget.onNavigateToSettings != null) widget.onNavigateToSettings!();
                 }),
                 borderRadius: BorderRadius.circular(10),
                 child: Container(
@@ -503,6 +515,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 balance: _getTierBalance('LONG_TERM_VAULT'),
               ),
 
+              const SizedBox(height: 20),
+
+              // Strategic AI CFO - Next Best Move
+              NextBestMoveWidget(
+                onViewAllGoals: () {
+                  if (widget.onNavigateToGoals != null) widget.onNavigateToGoals!();
+                },
+              ),
+
               const SizedBox(height: 24),
 
               // Restored Zero-Based Envelope Budget System Overview
@@ -531,6 +552,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
               // Debt & Credit Ledger Summary
               DebtCreditSummaryWidget(
                 onNavigateToLedger: widget.onNavigateToLedger,
+              ),
+
+              const SizedBox(height: 24),
+
+              // Scenario Sandbox Snapshot
+              ScenarioSnapshotWidget(
+                onOpenPlanner: () {
+                  if (widget.onNavigateToScenarios != null) widget.onNavigateToScenarios!();
+                },
+              ),
+
+              const SizedBox(height: 20),
+
+              // Tax Reserve Status Telemetry
+              TaxReserveStatusWidget(
+                onOpenTaxManager: () {
+                  if (widget.onNavigateToTax != null) widget.onNavigateToTax!();
+                },
               ),
 
               const SizedBox(height: 24),
@@ -616,9 +655,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
               onTabSelected: (idx) {
                 if (idx == 1 && widget.onNavigateToAssets != null) {
                   widget.onNavigateToAssets!();
-                }
-                if (idx == 2) widget.onNavigateToLedger();
-                if (idx == 3 && widget.onNavigateToSettings != null) {
+                } else if (idx == 2) {
+                  widget.onNavigateToLedger();
+                } else if (idx == 3 && widget.onNavigateToScenarios != null) {
+                  widget.onNavigateToScenarios!();
+                } else if (idx == 4 && widget.onNavigateToTax != null) {
+                  widget.onNavigateToTax!();
+                } else if (idx == 5 && widget.onNavigateToGoals != null) {
+                  widget.onNavigateToGoals!();
+                } else if (idx == 6 && widget.onNavigateToSettings != null) {
                   widget.onNavigateToSettings!();
                 }
               },
@@ -693,7 +738,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     onTap: () => GlobalSearchDialog.show(context, onNavigateToTab: (idx) {
                       if (idx == 1 && widget.onNavigateToAssets != null) widget.onNavigateToAssets!();
                       if (idx == 2) widget.onNavigateToLedger();
-                      if (idx == 3 && widget.onNavigateToSettings != null) widget.onNavigateToSettings!();
+                      if (idx == 3 && widget.onNavigateToScenarios != null) widget.onNavigateToScenarios!();
+                      if (idx == 4 && widget.onNavigateToTax != null) widget.onNavigateToTax!();
+                      if (idx == 5 && widget.onNavigateToGoals != null) widget.onNavigateToGoals!();
+                      if (idx == 6 && widget.onNavigateToSettings != null) widget.onNavigateToSettings!();
                     }),
                     borderRadius: BorderRadius.circular(8),
                     child: Container(
@@ -877,6 +925,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 const SizedBox(height: 28),
 
                 // -------------------------------------------------------
+                // 1.5. STRATEGIC PERSONAL CFO - NEXT BEST MOVE BANNER
+                // -------------------------------------------------------
+                NextBestMoveWidget(
+                  onViewAllGoals: () {
+                    if (widget.onNavigateToGoals != null) widget.onNavigateToGoals!();
+                  },
+                ),
+
+                const SizedBox(height: 28),
+
+                // -------------------------------------------------------
                 // 2. EXECUTIVE ANALYTICS HUB & TIME-SERIES TRENDS
                 // -------------------------------------------------------
                 const AnalyticsHubSection(),
@@ -918,6 +977,54 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           const SizedBox(height: 20),
                           DebtCreditSummaryWidget(
                             onNavigateToLedger: widget.onNavigateToLedger,
+                          ),
+                        ],
+                      );
+                    }
+                  },
+                ),
+
+                const SizedBox(height: 28),
+
+                // -------------------------------------------------------
+                // 3.5. SCENARIO SANDBOX & TAX AUTOMATION TELEMETRY
+                // -------------------------------------------------------
+                LayoutBuilder(
+                  builder: (context, intelConstraints) {
+                    if (intelConstraints.maxWidth >= 900) {
+                      return Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: ScenarioSnapshotWidget(
+                              onOpenPlanner: () {
+                                if (widget.onNavigateToScenarios != null) widget.onNavigateToScenarios!();
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 20),
+                          Expanded(
+                            child: TaxReserveStatusWidget(
+                              onOpenTaxManager: () {
+                                if (widget.onNavigateToTax != null) widget.onNavigateToTax!();
+                              },
+                            ),
+                          ),
+                        ],
+                      );
+                    } else {
+                      return Column(
+                        children: [
+                          ScenarioSnapshotWidget(
+                            onOpenPlanner: () {
+                              if (widget.onNavigateToScenarios != null) widget.onNavigateToScenarios!();
+                            },
+                          ),
+                          const SizedBox(height: 20),
+                          TaxReserveStatusWidget(
+                            onOpenTaxManager: () {
+                              if (widget.onNavigateToTax != null) widget.onNavigateToTax!();
+                            },
                           ),
                         ],
                       );
@@ -1202,6 +1309,30 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         icon: const Icon(Icons.handshake_outlined, size: 16, color: ZivaTheme.textPrimary),
                         label: const Text('Open Debt/Credit Ledger', style: TextStyle(color: ZivaTheme.textPrimary)),
                       ),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: () {
+                              if (widget.onNavigateToScenarios != null) widget.onNavigateToScenarios!();
+                            },
+                            icon: const Icon(Icons.science_outlined, size: 14, color: ZivaTheme.gold400),
+                            label: const Text('Sandbox', style: TextStyle(color: ZivaTheme.textPrimary, fontSize: 11)),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: () {
+                              if (widget.onNavigateToTax != null) widget.onNavigateToTax!();
+                            },
+                            icon: const Icon(Icons.shield_outlined, size: 14, color: ZivaTheme.emerald400),
+                            label: const Text('Tax Auto', style: TextStyle(color: ZivaTheme.textPrimary, fontSize: 11)),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),

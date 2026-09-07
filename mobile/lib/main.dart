@@ -10,8 +10,11 @@ import 'features/auth/privacy_shield.dart';
 import 'features/common/quick_add_fab.dart';
 import 'features/dashboard/dashboard_screen.dart';
 import 'features/desktop/desktop_sidebar.dart';
+import 'features/insights/strategic_insights_screen.dart';
 import 'features/ledger/ledger_screen.dart';
+import 'features/scenarios/scenario_planner_screen.dart';
 import 'features/settings/developer_settings_screen.dart';
+import 'features/tax/tax_automation_screen.dart';
 import 'services/biometric_service.dart';
 import 'services/sync_engine.dart';
 
@@ -89,8 +92,14 @@ class _MainNavigationShellState extends State<MainNavigationShell> with WidgetsB
       _currentTabIndex = 1;
     } else if (anchor.contains('ledger')) {
       _currentTabIndex = 2;
-    } else if (anchor.contains('settings') || anchor.contains('dev')) {
+    } else if (anchor.contains('scenario') || anchor.contains('sandbox')) {
       _currentTabIndex = 3;
+    } else if (anchor.contains('tax')) {
+      _currentTabIndex = 4;
+    } else if (anchor.contains('goal') || anchor.contains('insight') || anchor.contains('cfo')) {
+      _currentTabIndex = 5;
+    } else if (anchor.contains('settings') || anchor.contains('dev')) {
+      _currentTabIndex = 6;
     } else {
       _currentTabIndex = 0;
     }
@@ -106,6 +115,12 @@ class _MainNavigationShellState extends State<MainNavigationShell> with WidgetsB
       } else if (index == 2) {
         setUrlAnchor('ledger');
       } else if (index == 3) {
+        setUrlAnchor('scenarios');
+      } else if (index == 4) {
+        setUrlAnchor('tax-automation');
+      } else if (index == 5) {
+        setUrlAnchor('goals');
+      } else if (index == 6) {
         setUrlAnchor('settings');
       }
     });
@@ -230,12 +245,18 @@ class _MainNavigationShellState extends State<MainNavigationShell> with WidgetsB
                           selectedCurrency: _selectedCurrency,
                           onNavigateToAssets: () => _selectTab(1),
                           onNavigateToLedger: () => _selectTab(2),
-                          onNavigateToSettings: () => _selectTab(3),
+                          onNavigateToScenarios: () => _selectTab(3),
+                          onNavigateToTax: () => _selectTab(4),
+                          onNavigateToGoals: () => _selectTab(5),
+                          onNavigateToSettings: () => _selectTab(6),
                         ),
                         AssetRegistryScreen(
                           onBackToDashboard: () => _selectTab(0),
                         ),
                         const LedgerScreen(),
+                        const ScenarioPlannerScreen(),
+                        const TaxAutomationScreen(),
+                        const StrategicInsightsScreen(),
                         const DeveloperSettingsScreen(),
                       ],
                     ),
@@ -251,7 +272,7 @@ class _MainNavigationShellState extends State<MainNavigationShell> with WidgetsB
                             currentTabIndex: _currentTabIndex,
                             selectedCurrency: _selectedCurrency,
                             onCurrencyChanged: (curr) => setState(() => _selectedCurrency = curr),
-                            onSecretAdminTrigger: () => _selectTab(3),
+                            onSecretAdminTrigger: () => _selectTab(6),
                             onTabSelected: _selectTab,
                           ),
                           Expanded(child: mainContent),
@@ -300,6 +321,21 @@ class _MainNavigationShellState extends State<MainNavigationShell> with WidgetsB
                               ),
                               selectedIcon: const Icon(Icons.receipt_long_rounded, color: ZivaTheme.gold400),
                               label: 'Ledger',
+                            ),
+                            const NavigationDestination(
+                              icon: Icon(Icons.science_outlined, color: ZivaTheme.textMuted),
+                              selectedIcon: Icon(Icons.science_rounded, color: ZivaTheme.gold400),
+                              label: 'Sandbox',
+                            ),
+                            const NavigationDestination(
+                              icon: Icon(Icons.shield_outlined, color: ZivaTheme.textMuted),
+                              selectedIcon: Icon(Icons.shield_rounded, color: ZivaTheme.gold400),
+                              label: 'Tax',
+                            ),
+                            const NavigationDestination(
+                              icon: Icon(Icons.psychology_outlined, color: ZivaTheme.textMuted),
+                              selectedIcon: Icon(Icons.psychology_rounded, color: ZivaTheme.gold400),
+                              label: 'AI CFO',
                             ),
                             const NavigationDestination(
                               icon: Icon(Icons.tune_outlined, color: ZivaTheme.textMuted),

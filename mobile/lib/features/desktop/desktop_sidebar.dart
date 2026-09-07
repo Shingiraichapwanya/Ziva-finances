@@ -213,14 +213,50 @@ class DesktopSidebar extends StatelessWidget {
                     },
                   ),
 
-                  // 4. SYSTEM SETTINGS & PROOF OF DEPLOYMENT
+                  // 4. SCENARIO PLANNER (SANDBOX)
+                  _buildSidebarNavButton(
+                    icon: Icons.science_rounded,
+                    label: 'Scenario Planner',
+                    badge: 'SANDBOX',
+                    isActive: currentTabIndex == 3,
+                    onTap: () {
+                      setUrlAnchor('#scenarios');
+                      onTabSelected(3);
+                    },
+                  ),
+
+                  // 5. TAX RESERVE AUTOMATION
+                  _buildSidebarNavButton(
+                    icon: Icons.shield_outlined,
+                    label: 'Tax Reserve Automation',
+                    badge: 'AUTO',
+                    isActive: currentTabIndex == 4,
+                    onTap: () {
+                      setUrlAnchor('#tax-automation');
+                      onTabSelected(4);
+                    },
+                  ),
+
+                  // 6. STRATEGIC INSIGHTS & GOALS
+                  _buildSidebarNavButton(
+                    icon: Icons.psychology_rounded,
+                    label: 'Strategic Insights & Goals',
+                    badge: 'AI CFO',
+                    isActive: currentTabIndex == 5,
+                    onTap: () {
+                      setUrlAnchor('#goals');
+                      onTabSelected(5);
+                    },
+                  ),
+
+                  // 7. SYSTEM SETTINGS & PROOF OF DEPLOYMENT
                   _buildSidebarNavButton(
                     icon: Icons.tune_rounded,
                     label: 'System Settings & OTA',
-                    isActive: currentTabIndex == 3,
+                    isActive: currentTabIndex == 6,
                     onTap: () {
                       setUrlAnchor('#settings');
-                      onTabSelected(3);
+                      onTabSelected(6);
                     },
                   ),
                 ],

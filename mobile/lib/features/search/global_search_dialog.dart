@@ -3,6 +3,8 @@ import '../../core/theme/ziva_theme.dart';
 import '../../models/asset_model.dart';
 import '../../models/debt_model.dart';
 import '../../models/envelope_model.dart';
+import '../../models/scenario_model.dart';
+import '../../models/strategic_goal_model.dart';
 import '../../models/transaction_model.dart';
 import '../../services/sqlite_service.dart';
 
@@ -31,6 +33,8 @@ class _GlobalSearchDialogState extends State<GlobalSearchDialog> {
   List<EnvelopeModel> _allEnvelopes = [];
   List<DebtModel> _allDebts = [];
   List<AssetModel> _allAssets = [];
+  List<ScenarioModel> _allScenarios = [];
+  List<StrategicGoalModel> _allGoals = [];
 
   bool _isLoading = true;
   String _query = '';
@@ -56,6 +60,8 @@ class _GlobalSearchDialogState extends State<GlobalSearchDialog> {
     final envs = await SqliteService.instance.getEnvelopes();
     final debts = await SqliteService.instance.getDebts();
     final assets = await SqliteService.instance.getAssets();
+    final scenarios = SqliteService.instance.getScenarios();
+    final goals = SqliteService.instance.getStrategicGoals();
 
     if (mounted) {
       setState(() {
@@ -63,6 +69,8 @@ class _GlobalSearchDialogState extends State<GlobalSearchDialog> {
         _allEnvelopes = envs;
         _allDebts = debts;
         _allAssets = assets;
+        _allScenarios = scenarios;
+        _allGoals = goals;
         _isLoading = false;
       });
     }
@@ -89,6 +97,21 @@ class _GlobalSearchDialogState extends State<GlobalSearchDialog> {
                 d.notes.toLowerCase().contains(q);
           }).take(4).toList();
 
+    final matchedScenarios = q.isEmpty
+        ? <ScenarioModel>[]
+        : _allScenarios.where((s) {
+            return s.title.toLowerCase().contains(q) ||
+                s.description.toLowerCase().contains(q);
+          }).take(4).toList();
+
+    final matchedGoals = q.isEmpty
+        ? <StrategicGoalModel>[]
+        : _allGoals.where((g) {
+            return g.title.toLowerCase().contains(q) ||
+                g.rawInputPrompt.toLowerCase().contains(q) ||
+                g.intent.name.toLowerCase().contains(q);
+          }).take(4).toList();
+
     final matchedEnvelopes = q.isEmpty
         ? <EnvelopeModel>[]
         : _allEnvelopes.where((e) {
@@ -105,7 +128,12 @@ class _GlobalSearchDialogState extends State<GlobalSearchDialog> {
                 t.originalAmount.toString().contains(q);
           }).take(5).toList();
 
-    final totalMatches = matchedAssets.length + matchedDebts.length + matchedEnvelopes.length + matchedTransactions.length;
+    final totalMatches = matchedAssets.length +
+        matchedDebts.length +
+        matchedScenarios.length +
+        matchedGoals.length +
+        matchedEnvelopes.length +
+        matchedTransactions.length;
 
     return Dialog(
       backgroundColor: Colors.transparent,
@@ -197,6 +225,16 @@ class _GlobalSearchDialogState extends State<GlobalSearchDialog> {
                                 if (matchedDebts.isNotEmpty) ...[
                                   _buildSectionHeader('DEBTS & CREDIT SETTLEMENTS', Icons.handshake_rounded, ZivaTheme.emerald400),
                                   ...matchedDebts.map((d) => _buildDebtResultItem(d)),
+                                  const SizedBox(height: 12),
+                                ],
+                                if (matchedScenarios.isNotEmpty) ...[
+                                  _buildSectionHeader('FINANCIAL SCENARIOS (SANDBOX)', Icons.science_rounded, ZivaTheme.gold400),
+                                  ...matchedScenarios.map((s) => _buildScenarioResultItem(s)),
+                                  const SizedBox(height: 12),
+                                ],
+                                if (matchedGoals.isNotEmpty) ...[
+                                  _buildSectionHeader('STRATEGIC GOALS (PERSONAL CFO)', Icons.psychology_rounded, Colors.tealAccent),
+                                  ...matchedGoals.map((g) => _buildGoalResultItem(g)),
                                   const SizedBox(height: 12),
                                 ],
                                 if (matchedEnvelopes.isNotEmpty) ...[
@@ -354,6 +392,99 @@ class _GlobalSearchDialogState extends State<GlobalSearchDialog> {
             Text(
               'R ${env.currentBalanceZar.toStringAsFixed(0)} Left',
               style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.purpleAccent, fontFamily: 'monospace'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildScenarioResultItem(ScenarioModel scenario) {
+    final result = scenario.runSimulation();
+    final isPositive = result.projectedNetWorthDeltaZar >= 0;
+
+    return InkWell(
+      onTap: () {
+        Navigator.pop(context);
+        widget.onNavigateToTab?.call(3); // Tab 3 is Scenarios
+      },
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: ZivaTheme.bgCard,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: ZivaTheme.borderCard),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: ZivaTheme.gold400.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: const Icon(Icons.science_rounded, size: 14, color: ZivaTheme.gold400),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(scenario.title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: ZivaTheme.textPrimary)),
+                  Text(scenario.description.isNotEmpty ? scenario.description : 'What-if sandbox scenario', style: const TextStyle(fontSize: 11, color: ZivaTheme.textMuted), overflow: TextOverflow.ellipsis),
+                ],
+              ),
+            ),
+            Text(
+              '${isPositive ? '+' : ''}R ${result.projectedNetWorthDeltaZar.toStringAsFixed(0)}',
+              style: TextStyle(fontWeight: FontWeight.bold, color: isPositive ? ZivaTheme.emerald400 : ZivaTheme.rose400, fontFamily: 'monospace'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGoalResultItem(StrategicGoalModel goal) {
+    return InkWell(
+      onTap: () {
+        Navigator.pop(context);
+        widget.onNavigateToTab?.call(5); // Tab 5 is Strategic Goals
+      },
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: ZivaTheme.bgCard,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: ZivaTheme.borderCard),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: Colors.tealAccent.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: const Icon(Icons.psychology_rounded, size: 14, color: Colors.tealAccent),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(goal.title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: ZivaTheme.textPrimary)),
+                  Text('${goal.intent.name.toUpperCase()} • Priority: ${goal.priority.name.toUpperCase()}', style: const TextStyle(fontSize: 11, color: ZivaTheme.textMuted)),
+                ],
+              ),
+            ),
+            Text(
+              'R ${goal.targetAmountZar.toStringAsFixed(0)}',
+              style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.tealAccent, fontFamily: 'monospace'),
             ),
           ],
         ),

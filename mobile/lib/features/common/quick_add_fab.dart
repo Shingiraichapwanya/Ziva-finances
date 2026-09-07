@@ -109,6 +109,34 @@ class QuickAddFab extends StatelessWidget {
                 onNavigateToTab?.call(1); // Assets tab
               },
             ),
+            const SizedBox(height: 10),
+
+            // Option 5: New Sandbox Scenario
+            _buildOptionTile(
+              context: ctx,
+              title: 'New Sandbox Scenario',
+              subtitle: 'What-if financial modeling, major purchase simulation & stress-test',
+              icon: Icons.science_rounded,
+              color: ZivaTheme.gold400,
+              onTap: () {
+                Navigator.pop(ctx);
+                onNavigateToTab?.call(3); // Scenarios tab
+              },
+            ),
+            const SizedBox(height: 10),
+
+            // Option 6: Set Strategic Goal (Personal CFO)
+            _buildOptionTile(
+              context: ctx,
+              title: 'Set Strategic Goal (AI CFO)',
+              subtitle: 'Natural language target for emergency fund, debt paydown, or major asset',
+              icon: Icons.psychology_rounded,
+              color: Colors.tealAccent,
+              onTap: () {
+                Navigator.pop(ctx);
+                onNavigateToTab?.call(5); // Goals tab
+              },
+            ),
           ],
         ),
       ),

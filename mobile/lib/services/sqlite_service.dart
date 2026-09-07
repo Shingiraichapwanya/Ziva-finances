@@ -7,7 +7,10 @@ import '../models/account_model.dart';
 import '../models/asset_model.dart';
 import '../models/debt_model.dart';
 import '../models/envelope_model.dart';
+import '../models/scenario_model.dart';
+import '../models/strategic_goal_model.dart';
 import '../models/sync_queue_item.dart';
+import '../models/tax_automation_model.dart';
 import '../models/transaction_model.dart';
 import 'api_service.dart';
 
@@ -25,6 +28,10 @@ class SqliteService {
   final List<EnvelopeModel> _mockEnvelopes = [];
   final List<AssetModel> _mockAssets = [];
   final List<DebtModel> _mockDebts = [];
+  final List<ScenarioModel> _mockScenarios = [];
+  TaxAutomationConfig _taxConfig = const TaxAutomationConfig();
+  final List<TaxSkimRecord> _mockTaxSkims = [];
+  final List<StrategicGoalModel> _mockStrategicGoals = [];
 
   static final List<AssetModel> defaultAssets = [
     AssetModel(
@@ -306,6 +313,250 @@ class SqliteService {
     ),
   ];
 
+  static final List<ScenarioModel> defaultScenarios = [
+    ScenarioModel(
+      id: 'SCENARIO_COMMERCIAL_RE',
+      title: 'Acquire Commercial Tech Office (Century City)',
+      description: 'Acquire 350sqm prime commercial unit with existing blue-chip software tenant.',
+      horizonMonths: 24,
+      startDate: DateTime(2026, 10, 1),
+      status: ScenarioStatus.active,
+      oneTimeExpenses: [
+        ScenarioExpense(
+          id: 'EXP_RE_DOWNPAYMENT',
+          title: 'Commercial Bond Deposit (20%)',
+          amountZar: 1200000.0,
+          category: 'Real Estate Capital Allocation',
+          sourceEnvelopeId: 'CAT_SINKING_EMERGENCY',
+          targetDate: DateTime(2026, 10, 1),
+        ),
+        ScenarioExpense(
+          id: 'EXP_RE_TRANSFER_DUTY',
+          title: 'SARS Transfer Duty & Conveyancing Fees',
+          amountZar: 145000.0,
+          category: 'Legal & Transfer Duty',
+          sourceEnvelopeId: 'CAT_ESSENTIAL_TAX',
+          targetDate: DateTime(2026, 10, 15),
+        ),
+      ],
+      recurringChanges: [
+        const ScenarioRecurringChange(
+          id: 'REC_RENTAL_INFLOW',
+          title: 'Triple-Net Commercial Tenant Inflow',
+          monthlyDeltaZar: 42000.0,
+          isIncome: true,
+          targetEnvelopeId: 'CAT_ESSENTIAL_SAVINGS',
+        ),
+        const ScenarioRecurringChange(
+          id: 'REC_BOND_REPAYMENT',
+          title: 'Commercial Mortgage Servicing (FNB)',
+          monthlyDeltaZar: -28500.0,
+          isIncome: false,
+          targetEnvelopeId: 'CAT_ESSENTIAL_HOUSING',
+        ),
+      ],
+      fundingSourcePriorityIds: const ['CAT_SINKING_EMERGENCY', 'CAT_DISCRETIONARY_ENTERTAINMENT'],
+      stressTest: const StressTestParameters(
+        interestRateDeltaPercent: 1.5,
+        incomeReliabilityFactor: 0.90,
+        expenseSpikeFactor: 1.10,
+      ),
+      createdAt: DateTime(2026, 8, 15),
+      updatedAt: DateTime.now(),
+    ),
+    ScenarioModel(
+      id: 'SCENARIO_ACCELERATE_PORSCHE',
+      title: 'Accelerate WesBank GT3 Payoff (Zero in 12M)',
+      description: 'Lump-sum principal reduction and doubled monthly installments to eliminate 11.75% asset finance early.',
+      horizonMonths: 12,
+      startDate: DateTime(2026, 10, 1),
+      status: ScenarioStatus.active,
+      oneTimeExpenses: [
+        ScenarioExpense(
+          id: 'EXP_GT3_LUMP',
+          title: 'Immediate Principal Capital Injection',
+          amountZar: 250000.0,
+          category: 'Debt Principal Reduction',
+          sourceEnvelopeId: 'CAT_SINKING_MAINTENANCE',
+          targetDate: DateTime(2026, 10, 1),
+        ),
+      ],
+      recurringChanges: [
+        const ScenarioRecurringChange(
+          id: 'REC_GT3_EXTRA',
+          title: 'Accelerated Installment Top-Up',
+          monthlyDeltaZar: -40000.0,
+          isIncome: false,
+          targetEnvelopeId: 'CAT_SINKING_MAINTENANCE',
+        ),
+      ],
+      fundingSourcePriorityIds: const ['CAT_SINKING_MAINTENANCE'],
+      stressTest: const StressTestParameters(
+        interestRateDeltaPercent: 0.0,
+        incomeReliabilityFactor: 1.0,
+        expenseSpikeFactor: 1.05,
+      ),
+      createdAt: DateTime(2026, 8, 20),
+      updatedAt: DateTime.now(),
+    ),
+    ScenarioModel(
+      id: 'SCENARIO_SAAS_VENTURE',
+      title: 'Launch Antigravity AI Cloud SaaS Tier',
+      description: 'Bootstrap enterprise cluster hardware and monetize quantitative risk engine APIs.',
+      horizonMonths: 18,
+      startDate: DateTime(2026, 11, 1),
+      status: ScenarioStatus.draft,
+      oneTimeExpenses: [
+        ScenarioExpense(
+          id: 'EXP_GPU_CLUSTER',
+          title: 'Dedicated Enterprise Server Hardware',
+          amountZar: 320000.0,
+          category: 'Software Infrastructure',
+          sourceEnvelopeId: 'CAT_TECH_CLOUD',
+          targetDate: DateTime(2026, 11, 1),
+        ),
+      ],
+      recurringChanges: [
+        const ScenarioRecurringChange(
+          id: 'REC_SAAS_MRR',
+          title: 'Enterprise API Subscriptions (MRR)',
+          monthlyDeltaZar: 85000.0,
+          isIncome: true,
+          targetEnvelopeId: 'CAT_ESSENTIAL_SAVINGS',
+        ),
+        const ScenarioRecurringChange(
+          id: 'REC_CLOUD_INFRA',
+          title: 'GCP Bandwidth & Datacenter Hosting',
+          monthlyDeltaZar: -18000.0,
+          isIncome: false,
+          targetEnvelopeId: 'CAT_TECH_CLOUD',
+        ),
+      ],
+      fundingSourcePriorityIds: const ['CAT_TECH_CLOUD', 'CAT_DISCRETIONARY_ENTERTAINMENT'],
+      stressTest: const StressTestParameters(
+        interestRateDeltaPercent: 2.0,
+        incomeReliabilityFactor: 0.80,
+        expenseSpikeFactor: 1.25,
+      ),
+      createdAt: DateTime(2026, 9, 1),
+      updatedAt: DateTime.now(),
+    ),
+  ];
+
+  static final List<TaxSkimRecord> defaultTaxSkims = [
+    TaxSkimRecord(
+      id: 'SKIM_2026_01',
+      sourceTransactionId: 'TX_INFLOW_ADV_01',
+      sourceDescription: 'Executive Advisory Retainer (Apex Capital)',
+      grossIncomeZar: 68000.0,
+      taxRateAppliedPercent: 27.5,
+      skimmedTaxAmountZar: 18700.0,
+      targetEnvelopeId: 'CAT_ESSENTIAL_TAX',
+      targetEnvelopeName: 'Income Tax & SARS Reserve',
+      timestamp: DateTime(2026, 8, 28, 14, 30),
+    ),
+    TaxSkimRecord(
+      id: 'SKIM_2026_02',
+      sourceTransactionId: 'TX_INFLOW_TECH_02',
+      sourceDescription: 'Quantitative Systems Licensing (ZAR Settlement)',
+      grossIncomeZar: 45000.0,
+      taxRateAppliedPercent: 27.5,
+      skimmedTaxAmountZar: 12375.0,
+      targetEnvelopeId: 'CAT_ESSENTIAL_TAX',
+      targetEnvelopeName: 'Income Tax & SARS Reserve',
+      timestamp: DateTime(2026, 9, 2, 10, 15),
+    ),
+  ];
+
+  static final List<StrategicGoalModel> defaultStrategicGoals = [
+    StrategicGoalModel(
+      id: 'GOAL_EMERGENCY_BUFFER',
+      rawInputPrompt: 'I want to build a 6-month liquid emergency fund in 18 months without impacting my business runway',
+      title: 'Build 6-Month Liquid Emergency Buffer',
+      intent: GoalIntent.buildEmergencyReserve,
+      priority: GoalPriority.high,
+      targetAmountZar: 250000.0,
+      currentAmountZar: 145000.0,
+      targetHorizonMonths: 18,
+      targetDate: DateTime(2028, 3, 1),
+      recommendation: StrategicRecommendation(
+        recommendedMonthlyAllocationZar: 5833.0,
+        primaryTargetEnvelopeId: 'CAT_SINKING_EMERGENCY',
+        primaryTargetEnvelopeName: 'Emergency Reserve Sinking Fund',
+        debtPrioritizationMessage: 'Maintain minimum payments on asset finance; surplus easily covers this target.',
+        reallocationSuggestions: [
+          'Reallocate R3,000/mo from Discretionary Dining & Entertainment into Emergency Reserve.',
+        ],
+        projectedCompletionMonths: 14,
+        projectedCompletionDate: DateTime(2027, 11, 1),
+        actionSteps: [
+          'Direct R5,833/mo on the 1st of each calendar month to Emergency Reserve Sinking Fund.',
+          'Automate 15% skim from any ad-hoc consulting inflows into this buffer.',
+        ],
+        statusNudge: 'Ahead of Pace: Projected to complete 4 months ahead of target date at current savings velocity.',
+      ),
+      createdAt: DateTime(2026, 7, 10),
+      updatedAt: DateTime.now(),
+    ),
+    StrategicGoalModel(
+      id: 'GOAL_ELIMINATE_CARD_DEBT',
+      rawInputPrompt: 'I want to pay off my Discovery Card debt of R150,000 completely in 8 months',
+      title: 'Eliminate Revolving Credit Card Liability',
+      intent: GoalIntent.payOffDebt,
+      priority: GoalPriority.high,
+      targetAmountZar: 150000.0,
+      currentAmountZar: 35000.0,
+      targetHorizonMonths: 8,
+      targetDate: DateTime(2027, 5, 1),
+      recommendation: StrategicRecommendation(
+        recommendedMonthlyAllocationZar: 14375.0,
+        primaryTargetEnvelopeId: 'CAT_DISCRETIONARY_ENTERTAINMENT',
+        primaryTargetEnvelopeName: 'Debt Liquidation Allocation',
+        debtPrioritizationMessage: 'Discovery Card carries 18.5% APR. Pay down aggressively before funding low-yield cash deposits.',
+        reallocationSuggestions: [
+          'Reallocate R4,500/mo from Dining and R2,000/mo from Software infrastructure into debt payoff.',
+        ],
+        projectedCompletionMonths: 8,
+        projectedCompletionDate: DateTime(2027, 5, 1),
+        actionSteps: [
+          'Execute R14,375 monthly payment on the 25th before the billing cycle interest calculation.',
+          'Freeze new revolving charges on Discovery Card until zero balance is achieved.',
+        ],
+        statusNudge: 'On Track: Saving ~R2,100/mo in compounding interest by hitting this 8-month timeline.',
+      ),
+      createdAt: DateTime(2026, 8, 1),
+      updatedAt: DateTime.now(),
+    ),
+    StrategicGoalModel(
+      id: 'GOAL_DERISK_PORTFOLIO',
+      rawInputPrompt: 'Shift more capital into low-risk assets while keeping at least R100k liquid',
+      title: 'Portfolio De-Risking & Capital Preservation',
+      intent: GoalIntent.deRiskPortfolio,
+      priority: GoalPriority.medium,
+      targetAmountZar: 500000.0,
+      currentAmountZar: 180000.0,
+      targetHorizonMonths: 24,
+      targetDate: DateTime(2028, 9, 1),
+      recommendation: StrategicRecommendation(
+        recommendedMonthlyAllocationZar: 13333.0,
+        primaryTargetEnvelopeId: 'CAT_ESSENTIAL_SAVINGS',
+        primaryTargetEnvelopeName: 'Fixed-Income Treasury Allocation',
+        reallocationSuggestions: [
+          'Direct quarterly surplus distributions into RSA Retail Government Bonds (9.25% yield).',
+        ],
+        projectedCompletionMonths: 20,
+        projectedCompletionDate: DateTime(2028, 5, 1),
+        actionSteps: [
+          'Lock in 5-year fixed rate RSA retail bonds with compounding bi-annual coupon reinvestment.',
+          'Maintain minimum R100,000 liquid threshold in primary cheque and money market account.',
+        ],
+        statusNudge: 'Tactical CFO Insight: Secures guaranteed 9.25% real return ahead of projected rate cuts.',
+      ),
+      createdAt: DateTime(2026, 8, 15),
+      updatedAt: DateTime.now(),
+    ),
+  ];
+
   SqliteService._internal() {
     _ensureDefaultData();
   }
@@ -319,6 +570,15 @@ class SqliteService {
     }
     if (_mockDebts.isEmpty) {
       _mockDebts.addAll(defaultDebts);
+    }
+    if (_mockScenarios.isEmpty) {
+      _mockScenarios.addAll(defaultScenarios);
+    }
+    if (_mockTaxSkims.isEmpty) {
+      _mockTaxSkims.addAll(defaultTaxSkims);
+    }
+    if (_mockStrategicGoals.isEmpty) {
+      _mockStrategicGoals.addAll(defaultStrategicGoals);
     }
   }
 
@@ -335,6 +595,9 @@ class SqliteService {
     _mockEnvelopes.clear();
     _mockAssets.clear();
     _mockDebts.clear();
+    _mockScenarios.clear();
+    _mockTaxSkims.clear();
+    _mockStrategicGoals.clear();
     _ensureDefaultData();
     debugPrint('[SqliteService] Caches invalidated. Clean live state active.');
   }
@@ -438,6 +701,11 @@ class SqliteService {
   Future<void> saveTransaction(TransactionModel tx) async {
     // Automatically apply to local envelope balances
     applyTransactionToEnvelopes(tx);
+
+    // Tax Reserve Automation: Smart skimming from qualifying inflows
+    if (tx.transactionType.toLowerCase() == 'income' && !tx.notes.contains('[AUTO-TAX-SKIM]')) {
+      _processInflowTaxSkim(tx);
+    }
 
     if (kIsWeb) {
       // In web mode, route directly to BigQuery service and update in-memory cache
@@ -1067,5 +1335,228 @@ class SqliteService {
     final receivables = getTotalDebtsOwedToMeZar();
     final liabilities = getTotalDebtsOwedByMeZar();
     return liquidAccountsTotalZar + assetsContribution + receivables - liabilities;
+  }
+
+  // ==========================================
+  // PHASE THREE: SCENARIO PLANNER SANDBOX
+  // ==========================================
+
+  List<ScenarioModel> getScenarios() {
+    _ensureDefaultData();
+    return List.unmodifiable(_mockScenarios);
+  }
+
+  Future<void> saveScenario(ScenarioModel scenario) async {
+    _ensureDefaultData();
+    final idx = _mockScenarios.indexWhere((s) => s.id == scenario.id);
+    if (idx != -1) {
+      _mockScenarios[idx] = scenario.copyWith(updatedAt: DateTime.now());
+    } else {
+      _mockScenarios.insert(0, scenario);
+    }
+  }
+
+  Future<ScenarioModel?> duplicateScenario(String scenarioId) async {
+    _ensureDefaultData();
+    final idx = _mockScenarios.indexWhere((s) => s.id == scenarioId);
+    if (idx == -1) return null;
+    final original = _mockScenarios[idx];
+    final copy = original.copyWith(
+      id: 'SCENARIO_${DateTime.now().millisecondsSinceEpoch}',
+      title: '${original.title} (Copy)',
+      status: ScenarioStatus.draft,
+      createdAt: DateTime.now(),
+      updatedAt: DateTime.now(),
+    );
+    _mockScenarios.insert(0, copy);
+    return copy;
+  }
+
+  Future<void> archiveScenario(String scenarioId) async {
+    _ensureDefaultData();
+    final idx = _mockScenarios.indexWhere((s) => s.id == scenarioId);
+    if (idx != -1) {
+      _mockScenarios[idx] = _mockScenarios[idx].copyWith(
+        status: ScenarioStatus.archived,
+        updatedAt: DateTime.now(),
+      );
+    }
+  }
+
+  /// Explicit commit step: Applies scenario one-time and recurring moves to live store & BigQuery
+  Future<void> applyScenarioToLive(ScenarioModel scenario) async {
+    _ensureDefaultData();
+
+    // 1. One-time expenses -> dispatch transactions into target envelopes
+    for (final exp in scenario.oneTimeExpenses) {
+      final tx = TransactionModel(
+        transactionId: 'TX_SCENARIO_${exp.id}_${DateTime.now().millisecondsSinceEpoch}',
+        transactionDate: exp.targetDate.toIso8601String().split('T')[0],
+        accountId: 'ACC_CHEQ_01',
+        categoryId: exp.sourceEnvelopeId ?? 'CAT_DISCRETIONARY_ENTERTAINMENT',
+        categoryName: exp.category ?? 'Committed Scenario Outflow',
+        transactionType: 'expense',
+        originalAmount: exp.amountZar,
+        originalCurrency: 'ZAR',
+        reportingAmountZar: exp.amountZar,
+        reportingAmountUsd: exp.amountZar / 18.5,
+        merchantOrPayee: '[COMMITTED SCENARIO] ${exp.title}',
+        paymentMethod: 'EFT Wire',
+        isTaxDeductible: false,
+        notes: 'Applied from Scenario: ${scenario.title}',
+        tags: const ['ScenarioCommit', 'CapitalExpenditure'],
+        isSynced: false,
+      );
+      await saveTransaction(tx);
+    }
+
+    // 2. Recurring changes -> adjust planned envelope budgets
+    for (final rec in scenario.recurringChanges) {
+      if (rec.targetEnvelopeId != null) {
+        final envIdx = _mockEnvelopes.indexWhere((e) => e.categoryId == rec.targetEnvelopeId);
+        if (envIdx != -1) {
+          final env = _mockEnvelopes[envIdx];
+          final newPlanned = (env.plannedAmountZar + (rec.isIncome ? 0 : rec.monthlyDeltaZar.abs())).clamp(0.0, double.infinity);
+          _mockEnvelopes[envIdx] = env.copyWith(plannedAmountZar: newPlanned);
+        }
+      }
+    }
+
+    // 3. Mark scenario as committed
+    final idx = _mockScenarios.indexWhere((s) => s.id == scenario.id);
+    if (idx != -1) {
+      _mockScenarios[idx] = scenario.copyWith(
+        status: ScenarioStatus.committed,
+        updatedAt: DateTime.now(),
+      );
+    }
+  }
+
+  // ==========================================
+  // PHASE THREE: TAX RESERVE AUTOMATION
+  // ==========================================
+
+  TaxAutomationConfig getTaxConfig() => _taxConfig;
+
+  Future<void> saveTaxConfig(TaxAutomationConfig config) async {
+    _taxConfig = config;
+  }
+
+  List<TaxSkimRecord> getTaxSkimRecords() {
+    _ensureDefaultData();
+    return List.unmodifiable(_mockTaxSkims);
+  }
+
+  void _processInflowTaxSkim(TransactionModel tx) {
+    if (!_taxConfig.enabled || !_taxConfig.autoSkimOnIncome) return;
+    final skimAmount = _taxConfig.calculateSkimAmount(
+      grossAmountZar: tx.reportingAmountZar,
+      description: tx.merchantOrPayee,
+      category: tx.categoryName,
+    );
+    if (skimAmount <= 0) return;
+
+    final record = TaxSkimRecord(
+      id: 'SKIM_${DateTime.now().millisecondsSinceEpoch}',
+      sourceTransactionId: tx.transactionId,
+      sourceDescription: tx.merchantOrPayee,
+      grossIncomeZar: tx.reportingAmountZar,
+      taxRateAppliedPercent: _taxConfig.defaultTaxRatePercent,
+      skimmedTaxAmountZar: skimAmount,
+      targetEnvelopeId: _taxConfig.targetEnvelopeId,
+      targetEnvelopeName: _taxConfig.targetEnvelopeName,
+      timestamp: DateTime.now(),
+    );
+    _mockTaxSkims.insert(0, record);
+
+    // Apply to target tax envelope balance
+    final envIdx = _mockEnvelopes.indexWhere((e) => e.categoryId == _taxConfig.targetEnvelopeId);
+    if (envIdx != -1) {
+      final env = _mockEnvelopes[envIdx];
+      // Increasing envelope planned allocation & current reserve
+      _mockEnvelopes[envIdx] = env.copyWith(
+        plannedAmountZar: env.plannedAmountZar + skimAmount,
+      );
+    }
+  }
+
+  TaxReserveStatus calculateTaxReserveStatus() {
+    _ensureDefaultData();
+    final envIdx = _mockEnvelopes.indexWhere((e) => e.categoryId == _taxConfig.targetEnvelopeId);
+    final currentReserve = envIdx != -1 ? _mockEnvelopes[envIdx].currentBalanceZar : 48500.0;
+    final ytdSkimmed = _mockTaxSkims.fold<double>(0.0, (sum, s) => sum + s.skimmedTaxAmountZar);
+
+    // Estimated based on total monthly income run-rate ~R195,400/mo
+    const monthlyIncomeRunRate = 195400.0;
+    const annualIncomeEstimate = monthlyIncomeRunRate * 12;
+    final estimatedAnnualTax = annualIncomeEstimate * (_taxConfig.defaultTaxRatePercent / 100.0);
+    final quarterEstimatedTax = estimatedAnnualTax / 4.0;
+    final quarterReserves = currentReserve.clamp(0.0, double.infinity);
+
+    return TaxReserveStatus(
+      currentTaxReserveZar: currentReserve,
+      ytdTaxReservedZar: ytdSkimmed > 0 ? ytdSkimmed : 59250.0,
+      estimatedAnnualTaxObligationZar: estimatedAnnualTax,
+      currentQuarterEstimatedLiabilityZar: quarterEstimatedTax,
+      currentQuarterReservesZar: quarterReserves,
+    );
+  }
+
+  // ==========================================
+  // PHASE THREE: STRATEGIC INSIGHTS ENGINE
+  // ==========================================
+
+  List<StrategicGoalModel> getStrategicGoals() {
+    _ensureDefaultData();
+    return List.unmodifiable(_mockStrategicGoals);
+  }
+
+  Future<void> saveStrategicGoal(StrategicGoalModel goal) async {
+    _ensureDefaultData();
+    final idx = _mockStrategicGoals.indexWhere((g) => g.id == goal.id);
+    if (idx != -1) {
+      _mockStrategicGoals[idx] = goal.copyWith(updatedAt: DateTime.now());
+    } else {
+      _mockStrategicGoals.insert(0, goal);
+    }
+  }
+
+  Future<void> deleteStrategicGoal(String goalId) async {
+    _ensureDefaultData();
+    _mockStrategicGoals.removeWhere((g) => g.id == goalId);
+  }
+
+  StrategicGoalModel parseNaturalLanguageGoal(String prompt) {
+    _ensureDefaultData();
+    final envIdx = _mockEnvelopes.indexWhere((e) => e.categoryId == 'CAT_SINKING_EMERGENCY');
+    final emergencyReserve = envIdx != -1 ? _mockEnvelopes[envIdx].currentBalanceZar : 45000.0;
+    const monthlySurplus = 107200.0;
+    final highInterestDebt = getTotalDebtsOwedByMeZar();
+
+    final goal = StrategicGoalModel.parseFromPrompt(
+      prompt: prompt,
+      currentEmergencyReserveZar: emergencyReserve,
+      monthlyNetSurplusZar: monthlySurplus,
+      totalHighInterestDebtZar: highInterestDebt,
+    );
+    return goal;
+  }
+
+  StrategicRecommendation getPersonalCfoNextBestMove() {
+    final goals = getStrategicGoals();
+    if (goals.isNotEmpty) {
+      return goals.first.recommendation;
+    }
+    return StrategicRecommendation(
+      recommendedMonthlyAllocationZar: 14500.0,
+      primaryTargetEnvelopeId: 'CAT_SINKING_EMERGENCY',
+      primaryTargetEnvelopeName: 'Emergency Liquidity Reserve',
+      debtPrioritizationMessage: 'Prioritize paying off high-interest revolving balances before discretionary expansions.',
+      reallocationSuggestions: ['Reallocate R4,500 from Discretionary Dining into Emergency Fund.'],
+      projectedCompletionMonths: 12,
+      projectedCompletionDate: DateTime(2027, 3, 1),
+      actionSteps: ['Direct R14,500 on 1st of each month to Emergency Liquidity Reserve.'],
+      statusNudge: 'Tactical CFO Recommendation: Build 6-Month Emergency Runway to preserve wealth baseline.',
+    );
   }
 }
