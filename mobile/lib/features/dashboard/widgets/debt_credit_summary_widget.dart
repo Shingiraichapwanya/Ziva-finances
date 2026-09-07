@@ -26,12 +26,21 @@ class _DebtCreditSummaryWidgetState extends State<DebtCreditSummaryWidget> {
   }
 
   Future<void> _loadDebts() async {
-    final debts = await SqliteService.instance.getDebts();
-    if (mounted) {
-      setState(() {
-        _debts = debts;
-        _isLoading = false;
-      });
+    try {
+      final debts = await SqliteService.instance.getDebts();
+      if (mounted) {
+        setState(() {
+          _debts = debts;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _debts = [];
+          _isLoading = false;
+        });
+      }
     }
   }
 

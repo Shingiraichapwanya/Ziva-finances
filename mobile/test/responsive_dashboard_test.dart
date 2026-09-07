@@ -3,9 +3,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ziva_finance/core/layout/responsive_layout.dart';
 import 'package:ziva_finance/features/dashboard/dashboard_screen.dart';
 import 'package:ziva_finance/services/sqlite_service.dart';
+import 'test_api_helper.dart';
 
 void main() {
   setUp(() {
+    SqliteService.instance.setApiForTesting(createMockApiService());
     SqliteService.instance.invalidateAndClearCaches();
   });
 

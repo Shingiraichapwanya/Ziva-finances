@@ -23,7 +23,8 @@ import {
   getDebts,
   getDebtBalances,
   insertDebt,
-  settleDebt
+  settleDebt,
+  deleteDebt
 } from './bigquery.js';
 import { getCopilotInsights, chatWithCopilot } from './copilot.js';
 
@@ -165,6 +166,17 @@ app.patch('/api/debts/:id/settle', async (req, res) => {
     res.json(result);
   } catch (error) {
     console.error(`Error settling debt ${req.params.id}:`, error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/debts/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await deleteDebt(id);
+    res.json(result);
+  } catch (error) {
+    console.error(`Error deleting debt ${req.params.id}:`, error);
     res.status(500).json({ error: error.message });
   }
 });

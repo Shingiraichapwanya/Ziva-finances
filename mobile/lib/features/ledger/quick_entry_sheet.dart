@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../../core/currency/currency_display_state.dart';
@@ -11,7 +10,6 @@ import '../../core/utils/web_file_uploader.dart';
 import '../../models/transaction_model.dart';
 import '../../services/receipt_storage_service.dart';
 import '../../services/sqlite_service.dart';
-import '../../services/sync_engine.dart';
 
 class QuickEntryBottomSheet extends StatefulWidget {
   final void Function(TransactionModel) onTransactionLogged;
@@ -297,43 +295,66 @@ class _QuickEntryBottomSheetState extends State<QuickEntryBottomSheet> {
       receiptFileType: receiptRef?.fileType,
     );
 
-    // 1. OPTIMISTIC UI: Notify dashboard immediately and dismiss modal with 0ms lag
-    widget.onTransactionLogged(newTx);
-    Navigator.of(context).pop();
+    // Strict Confirmation Loop: Wait for verified BigQuery write-back
+    setState(() => _isSubmitting = true);
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        backgroundColor: ZivaTheme.bgSurface,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(10),
-          side: const BorderSide(color: ZivaTheme.gold400),
-        ),
-        content: const Row(
-          children: [
-            Icon(Icons.bolt_rounded, color: ZivaTheme.gold400, size: 20),
-            SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                'Transaction logged instantly • BigQuery background sync active',
-                style: TextStyle(color: ZivaTheme.textPrimary, fontSize: 13),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-
-    // 2. Background Persistence & Mutation Queue
     try {
-      await SqliteService.instance.saveTransaction(newTx);
-      await SqliteService.instance.enqueueMutation(
-        transactionId: txId,
-        payloadJson: jsonEncode(newTx.toJson()),
+      final confirmedTx = await SqliteService.instance.saveTransaction(newTx);
+
+      if (!mounted) return;
+
+      // Only after confirmed BigQuery write-back, update UI and dismiss
+      widget.onTransactionLogged(confirmedTx);
+      Navigator.of(context).pop();
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: ZivaTheme.bgSurface,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+            side: const BorderSide(color: ZivaTheme.gold400),
+          ),
+          content: Row(
+            children: [
+              const Icon(Icons.cloud_done_rounded, color: ZivaTheme.gold400, size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Transaction confirmed & written to BigQuery (${confirmedTx.originalCurrency} ${confirmedTx.originalAmount.toStringAsFixed(2)})',
+                  style: const TextStyle(color: ZivaTheme.textPrimary, fontSize: 13),
+                ),
+              ),
+            ],
+          ),
+        ),
       );
-      unawaited(SyncEngine.instance.processQueue());
     } catch (e) {
-      debugPrint('[QuickEntry] Background persistence error: $e');
+      if (!mounted) return;
+      setState(() => _isSubmitting = false);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: ZivaTheme.bgSurface,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+            side: const BorderSide(color: ZivaTheme.rose400),
+          ),
+          content: Row(
+            children: [
+              const Icon(Icons.error_outline_rounded, color: ZivaTheme.rose400, size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'BigQuery write failed: $e. Transaction was NOT saved.',
+                  style: const TextStyle(color: ZivaTheme.textPrimary, fontSize: 13),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
     }
   }
 
@@ -614,10 +635,17 @@ class _QuickEntryBottomSheetState extends State<QuickEntryBottomSheet> {
                   child: ElevatedButton(
                     onPressed: _isSubmitting ? null : _submitTransaction,
                     child: _isSubmitting
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
+                        ? const Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
+                              ),
+                              SizedBox(width: 10),
+                              Text('Writing to BigQuery Warehouse...', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black)),
+                            ],
                           )
                         : const Row(
                             mainAxisAlignment: MainAxisAlignment.center,

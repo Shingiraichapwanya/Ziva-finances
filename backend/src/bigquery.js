@@ -167,6 +167,7 @@ export async function getTransactions(limit = 100) {
       t.transaction_type AS transactionType,
       CAST(t.original_amount AS FLOAT64) AS originalAmount,
       t.original_currency AS originalCurrency,
+      t.original_currency AS currencyCode,
       CAST(t.reporting_amount_usd AS FLOAT64) AS reportingAmountUsd,
       CAST(t.reporting_amount_zar AS FLOAT64) AS reportingAmountZar,
       CAST(t.applied_exchange_rate_usd AS FLOAT64) AS appliedExchangeRateUsd,
@@ -180,6 +181,8 @@ export async function getTransactions(limit = 100) {
       t.tax_invoice_number AS taxInvoiceNumber,
       t.notes,
       t.tags,
+      JSON_VALUE(t.metadata, '$.receipt_storage_url') AS receiptStorageUrl,
+      JSON_VALUE(t.metadata, '$.receipt_file_type') AS receiptFileType,
       TRUE AS isSynced
     FROM \`${BQ_CONFIG.projectId}.${BQ_CONFIG.datasetId}.fct_transactions\` t
     LEFT JOIN \`${BQ_CONFIG.projectId}.${BQ_CONFIG.datasetId}.dim_categories\` c
@@ -191,6 +194,8 @@ export async function getTransactions(limit = 100) {
   return rows.map(r => ({
     ...r,
     originalAmount: parseFloat(r.originalAmount || 0),
+    originalCurrency: r.originalCurrency || 'ZAR',
+    currencyCode: r.currencyCode || r.originalCurrency || 'ZAR',
     reportingAmountUsd: parseFloat(r.reportingAmountUsd || 0),
     reportingAmountZar: parseFloat(r.reportingAmountZar || 0),
     appliedExchangeRateUsd: parseFloat(r.appliedExchangeRateUsd || 1),
@@ -198,6 +203,8 @@ export async function getTransactions(limit = 100) {
     taxDeductibleAmountZar: parseFloat(r.taxDeductibleAmountZar || 0),
     taxDeductibleAmountUsd: parseFloat(r.taxDeductibleAmountUsd || 0),
     isTaxDeductible: Boolean(r.isTaxDeductible),
+    receiptStorageUrl: r.receiptStorageUrl || null,
+    receiptFileType: r.receiptFileType || null,
     tags: Array.isArray(r.tags) ? r.tags : []
   }));
 }
@@ -375,25 +382,33 @@ export async function insertTransaction(txData) {
   let rateZar = 1.0;
   let rateType = 'OFFICIAL_INTERBANK';
 
-  const amount = parseFloat(txData.originalAmount);
-  const currency = txData.originalCurrency;
+  const rawAmount = parseFloat(txData.originalAmount ?? txData.amount ?? 0);
+  const rawCurrency = (txData.currencyCode || txData.currency_code || txData.originalCurrency || txData.original_currency || 'ZAR').toString().trim().toUpperCase();
+  const currency = rawCurrency === 'ZIG' ? 'ZWG' : rawCurrency;
 
   if (currency === 'ZAR') {
-    reportingZar = amount;
+    reportingZar = rawAmount;
     rateZar = 1.0;
-    rateUsd = rates.ZAR_TO_USD || (1 / rates.USD_TO_ZAR);
-    reportingUsd = amount * rateUsd;
+    rateUsd = rates.ZAR_TO_USD || (1 / (rates.USD_TO_ZAR || 18.25));
+    reportingUsd = rawAmount * rateUsd;
+    rateType = 'FIXED_BASE';
   } else if (currency === 'USD') {
-    reportingUsd = amount;
+    reportingUsd = rawAmount;
     rateUsd = 1.0;
-    rateZar = rates.USD_TO_ZAR;
-    reportingZar = amount * rateZar;
-  } else if (currency === 'ZiG') {
-    rateType = 'MARKET_PARALLEL';
-    rateUsd = rates.ZIG_TO_USD_PARALLEL || 0.040816;
-    rateZar = 1 / (rates.ZAR_TO_ZIG_PARALLEL || 1.342466);
-    reportingUsd = amount * rateUsd;
-    reportingZar = amount * rateZar;
+    rateZar = rates.USD_TO_ZAR || 18.25;
+    reportingZar = rawAmount * rateZar;
+    rateType = 'OFFICIAL_INTERBANK';
+  } else if (currency === 'ZWG' || currency === 'ZIG') {
+    rateType = 'OFFICIAL_INTERBANK';
+    rateUsd = 1 / 26.50;
+    rateZar = (rates.USD_TO_ZAR || 18.25) / 26.50;
+    reportingUsd = rawAmount * rateUsd;
+    reportingZar = rawAmount * rateZar;
+  } else {
+    reportingZar = rawAmount;
+    rateZar = 1.0;
+    rateUsd = 1 / 18.25;
+    reportingUsd = rawAmount * rateUsd;
   }
 
   const record = {
@@ -403,11 +418,11 @@ export async function insertTransaction(txData) {
     local_timezone: BQ_CONFIG.defaultTimezone,
     local_timestamp: localTimeStr,
     settlement_timestamp: timestampStr,
-    account_id: txData.accountId,
+    account_id: txData.accountId || 'ACC_CHECKING',
     cash_flow_tier: txData.cashFlowTier || 'DAILY_SPENDING',
-    category_id: txData.categoryId,
-    transaction_type: txData.transactionType || (amount < 0 ? 'EXPENSE' : 'INCOME'),
-    original_amount: amount,
+    category_id: txData.categoryId || 'CAT_GENERAL',
+    transaction_type: txData.transactionType || (rawAmount < 0 ? 'EXPENSE' : 'INCOME'),
+    original_amount: rawAmount,
     original_currency: currency,
     reporting_amount_usd: parseFloat(reportingUsd.toFixed(4)),
     reporting_amount_zar: parseFloat(reportingZar.toFixed(4)),
@@ -426,6 +441,9 @@ export async function insertTransaction(txData) {
     tags: Array.isArray(txData.tags) ? txData.tags : ['web_dashboard'],
     metadata: {
       source: 'web_command_center',
+      currency_code: currency,
+      receipt_storage_url: txData.receiptStorageUrl || txData.receipt_storage_url || txData.receiptUrl || null,
+      receipt_file_type: txData.receiptFileType || txData.receipt_file_type || null,
       ingested_at: isoString
     }
   };
@@ -745,12 +763,15 @@ export async function insertDebt(debtData) {
   const now = new Date().toISOString();
   const dateStr = debtData.date || now.split('T')[0];
 
+  const rawCurrency = (debtData.currency || debtData.currencyCode || debtData.currency_code || 'USD').toString().trim().toUpperCase();
+  const currency = rawCurrency === 'ZIG' ? 'ZWG' : rawCurrency;
+
   const record = {
     id: debtId,
-    person_name: debtData.personName || debtData.person_name,
-    direction: debtData.direction === 'owed_by_me' ? 'owed_by_me' : 'owed_to_me',
-    amount: parseFloat(Number(debtData.amount).toFixed(4)),
-    currency: debtData.currency || 'USD',
+    person_name: debtData.personName || debtData.person_name || 'Counterparty',
+    direction: (debtData.direction === 'owed_by_me' || debtData.direction === 'owedByMe') ? 'owed_by_me' : 'owed_to_me',
+    amount: parseFloat(Number(debtData.amount ?? debtData.originalPrincipalZar ?? 0).toFixed(4)),
+    currency: currency,
     date: dateStr,
     status: debtData.status || 'Pending',
     notes: debtData.notes || '',
@@ -821,6 +842,44 @@ export async function settleDebt(debtId) {
     debtId: cleanId,
     status: 'Settled',
     updatedAt: now
+  };
+}
+
+/**
+ * Delete a debt entry from debt_credit_ledger
+ */
+export async function deleteDebt(debtId) {
+  if (!debtId || typeof debtId !== 'string') {
+    throw new Error('Invalid or missing debt ID');
+  }
+  const cleanId = debtId.replace(/[^a-zA-Z0-9_-]/g, '');
+
+  const deleteSql = `
+    DELETE FROM \`${BQ_CONFIG.projectId}.${BQ_CONFIG.datasetId}.debt_credit_ledger\`
+    WHERE id = '${cleanId}'
+  `;
+  try {
+    await runQuery(deleteSql);
+  } catch (dmlErr) {
+    console.warn(`[BigQuery] DML DELETE notice for debt ${cleanId}, executing sandbox reload:`, dmlErr.message);
+    const selectSql = `SELECT * FROM \`${BQ_CONFIG.projectId}.${BQ_CONFIG.datasetId}.debt_credit_ledger\``;
+    const allRows = await runQuery(selectSql);
+    const filteredRows = allRows.filter(r => r.id !== cleanId);
+    const tempFile = path.join(__dirname, `debts_del_${Date.now()}.json`);
+    try {
+      fs.writeFileSync(tempFile, filteredRows.map(r => JSON.stringify(r)).join('\n'), 'utf8');
+      const loadCmd = `bq load --replace --project_id=${BQ_CONFIG.projectId} --location=${BQ_CONFIG.location} --source_format=NEWLINE_DELIMITED_JSON --label datacloud:antigravity ${BQ_CONFIG.projectId}:${BQ_CONFIG.datasetId}.debt_credit_ledger "${tempFile}"`;
+      execSync(loadCmd, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+    } finally {
+      if (fs.existsSync(tempFile)) {
+        try { fs.unlinkSync(tempFile); } catch (_) {}
+      }
+    }
+  }
+
+  return {
+    success: true,
+    debtId: cleanId
   };
 }
 

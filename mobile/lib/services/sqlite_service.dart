@@ -26,7 +26,12 @@ class SqliteService {
   static Database? _database;
   static bool _useMockFallback = false;
 
-  final ApiService _api = ApiService();
+  ApiService _api = ApiService();
+
+  @visibleForTesting
+  void setApiForTesting(ApiService api) {
+    _api = api;
+  }
 
   // In-memory mock storage fallback for web / unsupported SQLite environments
   final List<TransactionModel> _mockTransactions = [];
@@ -1076,9 +1081,6 @@ class SqliteService {
     if (_mockAssets.isEmpty) {
       _mockAssets.addAll(defaultAssets);
     }
-    if (_mockDebts.isEmpty) {
-      _mockDebts.addAll(defaultDebts);
-    }
     if (_mockScenarios.isEmpty) {
       _mockScenarios.addAll(defaultScenarios);
     }
@@ -1240,145 +1242,96 @@ class SqliteService {
     }
   }
 
-  // --- Transactions ---
+  // --- Transactions (Authoritative BigQuery Write-Back Layer) ---
 
-  Future<void> saveTransaction(TransactionModel tx) async {
-    // Automatically apply to local envelope balances
-    applyTransactionToEnvelopes(tx);
-
-    // Tax Reserve Automation: Smart skimming from qualifying inflows
-    if (tx.transactionType.toLowerCase() == 'income' && !tx.notes.contains('[AUTO-TAX-SKIM]')) {
-      _processInflowTaxSkim(tx);
+  Future<TransactionModel> saveTransaction(TransactionModel tx) async {
+    // 1. Send the write request directly to BigQuery
+    final res = await _api.postTransaction(tx.toJson());
+    if (res['success'] != true) {
+      throw Exception(res['error'] ?? 'BigQuery rejected transaction persistence');
     }
 
-    if (kIsWeb) {
-      // In web mode, route directly to BigQuery service and update in-memory cache
-      _mockTransactions.removeWhere((t) => t.transactionId == tx.transactionId);
-      _mockTransactions.insert(0, tx);
-      try {
-        final res = await _api.postTransaction(tx.toJson());
-        if (res['success'] == true) {
-          await markTransactionSynced(tx.transactionId);
-          debugPrint('[SqliteService] Web: Transaction ${tx.transactionId} posted directly to BigQuery.');
-        }
-      } catch (e) {
-        debugPrint('[SqliteService] Web: Direct BigQuery post failed: $e (stored locally in memory)');
+    final confirmedTx = res['record'] != null
+        ? TransactionModel.fromJson(res['record'] as Map<String, dynamic>)
+        : tx.copyWith(isSynced: true);
+
+    // 2. Only after confirmed successful BigQuery write, update local cache and envelopes
+    _mockTransactions.removeWhere((t) => t.transactionId == confirmedTx.transactionId);
+    _mockTransactions.insert(0, confirmedTx);
+
+    applyTransactionToEnvelopes(confirmedTx);
+
+    if (confirmedTx.transactionType.toLowerCase() == 'income' && !confirmedTx.notes.contains('[AUTO-TAX-SKIM]')) {
+      _processInflowTaxSkim(confirmedTx);
+    }
+
+    if (!kIsWeb) {
+      final db = await database;
+      if (db != null) {
+        await db.insert(
+          'local_transactions',
+          confirmedTx.toSqliteMap(),
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
       }
-      return;
     }
 
-    final db = await database;
-    if (_useMockFallback || db == null) {
-      _mockTransactions.removeWhere((t) => t.transactionId == tx.transactionId);
-      _mockTransactions.insert(0, tx);
-      return;
-    }
-    await db.insert(
-      'local_transactions',
-      tx.toSqliteMap(),
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    debugPrint('[SqliteService] Transaction ${confirmedTx.transactionId} confirmed in BigQuery fct_transactions.');
+    return confirmedTx;
   }
 
   Future<void> saveTransactionsBatch(List<TransactionModel> list) async {
-    if (kIsWeb || _useMockFallback) {
-      for (final tx in list) {
-        _mockTransactions.removeWhere((t) => t.transactionId == tx.transactionId);
-        _mockTransactions.add(tx);
-      }
-      return;
-    }
-    final db = await database;
-    if (db == null) {
-      for (final tx in list) {
-        _mockTransactions.removeWhere((t) => t.transactionId == tx.transactionId);
-        _mockTransactions.add(tx);
-      }
-      return;
-    }
-    final batch = db.batch();
     for (final tx in list) {
-      batch.insert(
-        'local_transactions',
-        tx.toSqliteMap(),
-        conflictAlgorithm: ConflictAlgorithm.replace,
-      );
+      await saveTransaction(tx);
     }
-    await batch.commit(noResult: true);
   }
 
-  /// Fetches transactions. On web (kIsWeb), directly routes to BigQuery service.
+  /// Fetches transactions directly from BigQuery (fct_transactions).
   Future<List<TransactionModel>> getTransactions({int limit = 100}) async {
-    if (kIsWeb) {
-      try {
-        final bqTxs = await _api.fetchTransactions(limit: limit);
-        _mockTransactions.clear();
-        if (bqTxs.isNotEmpty) {
-          _mockTransactions.addAll(bqTxs);
-          debugPrint('[SqliteService] Web: Successfully retrieved ${bqTxs.length} ledger transactions directly from BigQuery.');
-        } else {
-          debugPrint('[SqliteService] Web: Live BigQuery transaction table has 0 rows.');
-        }
-        return bqTxs;
-      } catch (e) {
-        debugPrint('[SqliteService] Web: Direct BigQuery fetch failed: $e. Returning empty list.');
-        return [];
+    try {
+      final bqTxs = await _api.fetchTransactions(limit: limit);
+      _mockTransactions.clear();
+      if (bqTxs.isNotEmpty) {
+        _mockTransactions.addAll(bqTxs);
+        debugPrint('[SqliteService] Retrieved ${bqTxs.length} canonical transactions directly from BigQuery.');
+      } else {
+        debugPrint('[SqliteService] BigQuery fct_transactions table currently has 0 rows.');
       }
+      return bqTxs;
+    } catch (e) {
+      debugPrint('[SqliteService] BigQuery transaction fetch failed: $e');
+      rethrow;
     }
-
-    final db = await database;
-    if (_useMockFallback || db == null) {
-      final sorted = List<TransactionModel>.from(_mockTransactions)
-        ..sort((a, b) => b.transactionDate.compareTo(a.transactionDate));
-      return sorted.take(limit).toList();
-    }
-    final result = await db.query(
-      'local_transactions',
-      orderBy: 'transaction_date DESC, created_at DESC',
-      limit: limit,
-    );
-    return result.map((map) => TransactionModel.fromJson(map)).toList();
   }
 
   Future<void> markTransactionSynced(String transactionId) async {
-    if (kIsWeb || _useMockFallback) {
-      final idx = _mockTransactions.indexWhere((t) => t.transactionId == transactionId);
-      if (idx != -1) {
-        final old = _mockTransactions[idx];
-        _mockTransactions[idx] = TransactionModel(
-          transactionId: old.transactionId,
-          transactionDate: old.transactionDate,
-          accountId: old.accountId,
-          categoryId: old.categoryId,
-          categoryName: old.categoryName,
-          transactionType: old.transactionType,
-          originalAmount: old.originalAmount,
-          originalCurrency: old.originalCurrency,
-          reportingAmountZar: old.reportingAmountZar,
-          reportingAmountUsd: old.reportingAmountUsd,
-          merchantOrPayee: old.merchantOrPayee,
-          paymentMethod: old.paymentMethod,
-          isTaxDeductible: old.isTaxDeductible,
-          notes: old.notes,
-          tags: old.tags,
-          isSynced: true,
+    final idx = _mockTransactions.indexWhere((t) => t.transactionId == transactionId);
+    if (idx != -1) {
+      final old = _mockTransactions[idx];
+      _mockTransactions[idx] = old.copyWith(isSynced: true);
+    }
+    if (!kIsWeb) {
+      final db = await database;
+      if (db != null) {
+        await db.update(
+          'local_transactions',
+          {'is_synced': 1},
+          where: 'transaction_id = ?',
+          whereArgs: [transactionId],
         );
       }
-      return;
     }
-    final db = await database;
-    if (db == null) return;
-    await db.update(
-      'local_transactions',
-      {'is_synced': 1},
-      where: 'transaction_id = ?',
-      whereArgs: [transactionId],
-    );
   }
 
-  /// Deletes a transaction from BigQuery and local stores
+  /// Deletes a transaction directly from BigQuery (fct_transactions) and updates local state
   Future<bool> deleteTransaction(String transactionId) async {
-    // 1. Immediately prune from in-memory cache and revert envelope balances
+    // 1. Execute delete directly against BigQuery warehouse
+    final success = await _api.deleteTransaction(transactionId);
+    if (!success) {
+      throw Exception('BigQuery failed to delete transaction $transactionId');
+    }
+
+    // 2. Only after confirmed successful deletion, prune local state
     final idx = _mockTransactions.indexWhere((t) => t.transactionId == transactionId);
     if (idx != -1) {
       final tx = _mockTransactions[idx];
@@ -1388,38 +1341,18 @@ class SqliteService {
       _mockTransactions.removeWhere((t) => t.transactionId == transactionId);
     }
 
-    if (kIsWeb) {
-      try {
-        final success = await _api.deleteTransaction(transactionId);
-        debugPrint('[SqliteService] Web: Successfully deleted transaction $transactionId from BigQuery.');
-        return success;
-      } catch (e) {
-        debugPrint('[SqliteService] Web: BigQuery delete call failed: $e (pruned from local session).');
-        return true;
+    if (!kIsWeb) {
+      final db = await database;
+      if (db != null) {
+        await db.delete(
+          'local_transactions',
+          where: 'transaction_id = ?',
+          whereArgs: [transactionId],
+        );
       }
     }
 
-    final db = await database;
-    if (_useMockFallback || db == null) {
-      return true;
-    }
-
-    // 2. Delete from local SQLite table
-    await db.delete(
-      'local_transactions',
-      where: 'transaction_id = ?',
-      whereArgs: [transactionId],
-    );
-
-    // 3. Delete from BigQuery directly if online, or enqueue deletion mutation
-    try {
-      await _api.deleteTransaction(transactionId);
-    } catch (_) {
-      await enqueueMutation(
-        transactionId: transactionId,
-        payloadJson: jsonEncode({'action': 'DELETE', 'transactionId': transactionId}),
-      );
-    }
+    debugPrint('[SqliteService] Successfully deleted transaction $transactionId from BigQuery.');
     return true;
   }
 
@@ -1748,33 +1681,54 @@ class SqliteService {
   }
 
   // =========================================================================
-  // DEBT & CREDIT LEDGER METHODS
+  // DEBT & CREDIT LEDGER METHODS (Authoritative BigQuery Write-Back)
   // =========================================================================
 
-  /// Fetch all debts and credits
+  /// Fetch all debts and credits directly from BigQuery debt_credit_ledger
   Future<List<DebtModel>> getDebts({DebtDirection? direction}) async {
-    _ensureDefaultData();
-    if (direction != null) {
-      return _mockDebts.where((d) => d.direction == direction).toList();
+    try {
+      final bqDebts = await _api.fetchDebts();
+      _mockDebts.clear();
+      _mockDebts.addAll(bqDebts);
+      if (direction != null) {
+        return bqDebts.where((d) => d.direction == direction).toList();
+      }
+      return bqDebts;
+    } catch (e) {
+      debugPrint('[SqliteService] BigQuery debt fetch failed: $e');
+      rethrow;
     }
-    return List<DebtModel>.from(_mockDebts);
   }
 
-  /// Save or update a debt/credit entry
-  Future<void> saveDebt(DebtModel debt) async {
-    _ensureDefaultData();
-    final idx = _mockDebts.indexWhere((d) => d.id == debt.id);
+  /// Save or update a debt/credit entry directly into BigQuery debt_credit_ledger
+  Future<DebtModel> saveDebt(DebtModel debt) async {
+    final res = await _api.postDebt(debt.toJson());
+    if (res['success'] != true) {
+      throw Exception(res['error'] ?? 'BigQuery debt insertion rejected');
+    }
+
+    final confirmed = res['record'] != null
+        ? DebtModel.fromJson(res['record'] as Map<String, dynamic>)
+        : debt;
+
+    final idx = _mockDebts.indexWhere((d) => d.id == confirmed.id);
     if (idx != -1) {
-      _mockDebts[idx] = debt;
+      _mockDebts[idx] = confirmed;
     } else {
-      _mockDebts.insert(0, debt);
+      _mockDebts.insert(0, confirmed);
     }
+    debugPrint('[SqliteService] Debt ${confirmed.id} confirmed in BigQuery debt_credit_ledger.');
+    return confirmed;
   }
 
-  /// Delete a debt/credit entry
+  /// Delete a debt/credit entry directly from BigQuery debt_credit_ledger
   Future<void> deleteDebt(String id) async {
-    _ensureDefaultData();
+    final success = await _api.deleteDebt(id);
+    if (!success) {
+      throw Exception('Failed to delete debt $id from BigQuery.');
+    }
     _mockDebts.removeWhere((d) => d.id == id);
+    debugPrint('[SqliteService] Debt $id successfully deleted from BigQuery.');
   }
 
   /// Record a repayment / settlement event against a debt record
@@ -1817,9 +1771,20 @@ class SqliteService {
       repayments: updatedRepayments,
     );
 
+    // Persist settlement state to BigQuery if fully paid
+    if (isFullyPaid) {
+      try {
+        await _api.settleDebt(debtId);
+        debugPrint('[SqliteService] Settled status written back to BigQuery for debt $debtId');
+      } catch (e) {
+        debugPrint('[SqliteService] Failed to write back settlement to BigQuery: $e');
+        rethrow;
+      }
+    }
+
     _mockDebts[idx] = updatedDebt;
 
-    // Optimistically deduct from linked/source envelope if specified
+    // Deduct from linked/source envelope if specified
     if (sourceEnvelopeId != null && amountZar > 0) {
       final envIdx = _mockEnvelopes.indexWhere((e) => e.categoryId == sourceEnvelopeId);
       if (envIdx != -1) {
@@ -1844,6 +1809,9 @@ class SqliteService {
   /// Full payoff Settle Up action
   Future<DebtModel?> settleDebt(String debtId, {String paymentMethod = 'EFT Wire', String? sourceEnvelopeId}) async {
     _ensureDefaultData();
+    // Persist directly to BigQuery
+    await _api.settleDebt(debtId);
+
     final idx = _mockDebts.indexWhere((d) => d.id == debtId);
     if (idx == -1) return null;
     final debt = _mockDebts[idx];

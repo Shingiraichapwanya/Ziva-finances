@@ -3,9 +3,15 @@ import 'package:ziva_finance/models/scenario_model.dart';
 import 'package:ziva_finance/models/tax_automation_model.dart';
 import 'package:ziva_finance/models/strategic_goal_model.dart';
 import 'package:ziva_finance/services/sqlite_service.dart';
+import 'test_api_helper.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  setUp(() {
+    SqliteService.instance.setApiForTesting(createMockApiService());
+    SqliteService.instance.invalidateAndClearCaches();
+  });
 
   group('Scenario Planner Sandbox Unit Tests', () {
     test('runSimulation computes accurate baseline trajectory without stress test', () {

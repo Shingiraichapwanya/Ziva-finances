@@ -201,63 +201,81 @@ class DebtModel {
   Map<String, dynamic> toJson() => {
         'id': id,
         'counterparty': counterparty,
-        'direction': direction.name,
+        'person_name': counterparty,
+        'personName': counterparty,
+        'direction': direction == DebtDirection.owedToMe ? 'owed_to_me' : 'owed_by_me',
         'debt_type': debtType.name,
+        'amount': originalPrincipalZar,
         'original_principal_zar': originalPrincipalZar,
         'current_outstanding_balance_zar': currentOutstandingBalanceZar,
         'currency': currency,
         'currency_code': currency,
         'interest_rate_percent': interestRatePercent,
         'minimum_monthly_payment_zar': minimumMonthlyPaymentZar,
+        'date': (dueDate ?? createdAt).toIso8601String().split('T')[0],
         'due_date': dueDate?.toIso8601String(),
         'linked_envelope_id': linkedEnvelopeId,
         'linked_envelope_name': linkedEnvelopeName,
-        'status': status.name,
+        'status': status == DebtStatus.paidOff ? 'Settled' : 'Pending',
         'notes': notes,
         'repayments': repayments.map((r) => r.toJson()).toList(),
         'created_at': createdAt.toIso8601String(),
         'updated_at': updatedAt.toIso8601String(),
       };
 
-  factory DebtModel.fromJson(Map<String, dynamic> json) => DebtModel(
-        id: json['id'] as String,
-        counterparty: json['counterparty'] as String,
-        direction: DebtDirection.values.firstWhere(
-          (e) => e.name == json['direction'],
-          orElse: () => DebtDirection.owedByMe,
-        ),
-        debtType: DebtType.values.firstWhere(
-          (e) => e.name == json['debt_type'],
-          orElse: () => DebtType.personalLoan,
-        ),
-        originalPrincipalZar:
-            (json['original_principal_zar'] as num?)?.toDouble() ?? 0.0,
-        currentOutstandingBalanceZar:
-            (json['current_outstanding_balance_zar'] as num?)?.toDouble() ?? 0.0,
-        currency: (json['currency_code'] ?? json['currency'] ?? 'ZAR').toString(),
-        interestRatePercent: (json['interest_rate_percent'] as num?)?.toDouble(),
-        minimumMonthlyPaymentZar:
-            (json['minimum_monthly_payment_zar'] as num?)?.toDouble(),
-        dueDate: json['due_date'] != null
-            ? DateTime.tryParse(json['due_date'].toString())
-            : null,
-        linkedEnvelopeId: json['linked_envelope_id'] as String?,
-        linkedEnvelopeName: json['linked_envelope_name'] as String?,
-        status: DebtStatus.values.firstWhere(
-          (e) => e.name == json['status'],
-          orElse: () => DebtStatus.current,
-        ),
-        notes: json['notes'] as String? ?? '',
-        repayments: (json['repayments'] as List<dynamic>?)
-                ?.map((item) =>
-                    DebtRepaymentModel.fromJson(item as Map<String, dynamic>))
-                .toList() ??
-            const [],
-        createdAt: json['created_at'] != null
-            ? DateTime.tryParse(json['created_at'].toString()) ?? DateTime.now()
-            : DateTime.now(),
-        updatedAt: json['updated_at'] != null
-            ? DateTime.tryParse(json['updated_at'].toString()) ?? DateTime.now()
-            : DateTime.now(),
-      );
+  factory DebtModel.fromJson(Map<String, dynamic> json) {
+    final String cparty = (json['person_name'] ?? json['personName'] ?? json['counterparty'] ?? 'Counterparty').toString();
+    
+    // Direction mapping: 'owed_to_me' / 'owedToMe' -> DebtDirection.owedToMe
+    final rawDir = (json['direction'] ?? '').toString().trim().toLowerCase();
+    final DebtDirection dir = (rawDir == 'owed_to_me' || rawDir == 'owedtome')
+        ? DebtDirection.owedToMe
+        : DebtDirection.owedByMe;
+
+    final num? rawAmount = (json['amount'] ?? json['original_principal_zar']) as num?;
+    final double amountVal = (rawAmount ?? 0.0).toDouble();
+
+    final num? rawOutstanding = (json['current_outstanding_balance_zar'] ?? json['amount']) as num?;
+    final double outstandingVal = (rawOutstanding ?? amountVal).toDouble();
+
+    final rawStatus = (json['status'] ?? '').toString();
+    final DebtStatus stat = (rawStatus.toLowerCase() == 'settled' || rawStatus == 'paidoff')
+        ? DebtStatus.paidOff
+        : DebtStatus.current;
+
+    final rawCurrency = (json['currency_code'] ?? json['currency'] ?? 'USD').toString().trim().toUpperCase();
+    final effectiveCurrency = rawCurrency == 'ZIG' ? 'ZWG' : rawCurrency;
+
+    return DebtModel(
+      id: (json['id'] ?? '').toString(),
+      counterparty: cparty,
+      direction: dir,
+      debtType: DebtType.values.firstWhere(
+        (e) => e.name == json['debt_type'],
+        orElse: () => DebtType.personalLoan,
+      ),
+      originalPrincipalZar: amountVal,
+      currentOutstandingBalanceZar: (stat == DebtStatus.paidOff) ? 0.0 : outstandingVal,
+      currency: effectiveCurrency,
+      interestRatePercent: (json['interest_rate_percent'] as num?)?.toDouble(),
+      minimumMonthlyPaymentZar: (json['minimum_monthly_payment_zar'] as num?)?.toDouble(),
+      dueDate: json['due_date'] != null || json['date'] != null
+          ? DateTime.tryParse((json['due_date'] ?? json['date']).toString())
+          : null,
+      linkedEnvelopeId: json['linked_envelope_id'] as String?,
+      linkedEnvelopeName: json['linked_envelope_name'] as String?,
+      status: stat,
+      notes: (json['notes'] ?? '').toString(),
+      repayments: (json['repayments'] as List<dynamic>?)
+              ?.map((item) => DebtRepaymentModel.fromJson(item as Map<String, dynamic>))
+              .toList() ??
+          const [],
+      createdAt: json['created_at'] != null
+          ? DateTime.tryParse(json['created_at'].toString()) ?? DateTime.now()
+          : DateTime.now(),
+      updatedAt: json['updated_at'] != null
+          ? DateTime.tryParse(json['updated_at'].toString()) ?? DateTime.now()
+          : DateTime.now(),
+    );
+  }
 }

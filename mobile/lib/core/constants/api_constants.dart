@@ -26,6 +26,7 @@ class ApiConstants {
   static const String ratesEndpoint = '/api/rates';
   static const String accountsEndpoint = '/api/accounts';
   static const String transactionsEndpoint = '/api/transactions';
+  static const String debtsEndpoint = '/api/debts';
   static const String budgetsEndpoint = '/api/budgets';
   static const String burnRateEndpoint = '/api/burn-rate';
   static const String taxScheduleEndpoint = '/api/tax-schedule';

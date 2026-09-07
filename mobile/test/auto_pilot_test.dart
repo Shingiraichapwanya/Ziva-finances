@@ -7,9 +7,14 @@ import 'package:ziva_finance/models/predictive_cashflow_model.dart';
 import 'package:ziva_finance/models/bank_sync_model.dart';
 import 'package:ziva_finance/models/legacy_vault_model.dart';
 import 'package:ziva_finance/services/sqlite_service.dart';
+import 'test_api_helper.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  setUp(() {
+    SqliteService.instance.setApiForTesting(createMockApiService());
+  });
 
   group('Phase Four: Email-to-Ledger Intelligence', () {
     test('EmailTransactionProposal models financial documents with confidence and metadata', () {

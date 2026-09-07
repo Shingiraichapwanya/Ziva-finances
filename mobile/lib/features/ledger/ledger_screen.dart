@@ -7,6 +7,7 @@ import '../../core/utils/currency_formatter.dart';
 import '../../models/debt_model.dart';
 import '../../models/envelope_model.dart';
 import '../../models/transaction_model.dart';
+import '../../services/api_service.dart';
 import '../../services/sqlite_service.dart';
 import '../../services/sync_engine.dart';
 import '../../services/tax_export_service.dart';
@@ -37,6 +38,11 @@ class _LedgerScreenState extends State<LedgerScreen> with SingleTickerProviderSt
   bool _isLoadingDebts = true;
   String _debtStatusFilter = 'ALL'; // ALL, ACTIVE, OVERDUE, PAID_OFF
 
+  // BigQuery Connection State
+  bool _isBigQueryConnected = false;
+  bool _isCheckingConnection = false;
+  String? _connectionError;
+
   @override
   void initState() {
     super.initState();
@@ -54,8 +60,31 @@ class _LedgerScreenState extends State<LedgerScreen> with SingleTickerProviderSt
     super.dispose();
   }
 
+  Future<void> _checkBigQueryConnection() async {
+    setState(() => _isCheckingConnection = true);
+    try {
+      final health = await ApiService().checkHealth();
+      if (mounted) {
+        setState(() {
+          _isBigQueryConnected = health['status'] == 'ONLINE' || health['status'] == 'ok';
+          _connectionError = null;
+          _isCheckingConnection = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isBigQueryConnected = false;
+          _connectionError = e.toString();
+          _isCheckingConnection = false;
+        });
+      }
+    }
+  }
+
   Future<void> _loadAllData() async {
     await Future.wait([
+      _checkBigQueryConnection(),
       _loadLocalLedger(),
       _loadDebtsAndEnvelopes(),
     ]);
@@ -63,32 +92,52 @@ class _LedgerScreenState extends State<LedgerScreen> with SingleTickerProviderSt
 
   Future<void> _loadLocalLedger() async {
     setState(() => _isLoadingTxs = true);
-    final txs = await SqliteService.instance.getTransactions(limit: 100);
-    if (mounted) {
-      setState(() {
-        _transactions = txs;
-        _isLoadingTxs = false;
-      });
+    try {
+      final txs = await SqliteService.instance.getTransactions(limit: 100);
+      if (mounted) {
+        setState(() {
+          _transactions = txs;
+          _isLoadingTxs = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('[LedgerScreen] Failed to load transactions from BigQuery: $e');
+      if (mounted) {
+        setState(() {
+          _transactions = [];
+          _isLoadingTxs = false;
+        });
+      }
     }
   }
 
   Future<void> _loadDebtsAndEnvelopes() async {
     setState(() => _isLoadingDebts = true);
-    final debts = await SqliteService.instance.getDebts();
-    final envs = await SqliteService.instance.getEnvelopes();
-    if (mounted) {
-      setState(() {
-        _debts = debts;
-        _envelopes = envs;
-        _isLoadingDebts = false;
-      });
+    try {
+      final debts = await SqliteService.instance.getDebts();
+      final envs = await SqliteService.instance.getEnvelopes();
+      if (mounted) {
+        setState(() {
+          _debts = debts;
+          _envelopes = envs;
+          _isLoadingDebts = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('[LedgerScreen] Failed to load debts from BigQuery: $e');
+      if (mounted) {
+        setState(() {
+          _debts = [];
+          _isLoadingDebts = false;
+        });
+      }
     }
   }
 
   Future<void> _onRefresh() async {
-    await SyncEngine.instance.processQueue();
-    await SyncEngine.instance.refreshFromBigQuery();
-    await _loadAllData();
+    await _checkBigQueryConnection();
+    await _loadLocalLedger();
+    await _loadDebtsAndEnvelopes();
   }
 
   // =========================================================================
@@ -434,13 +483,39 @@ class _LedgerScreenState extends State<LedgerScreen> with SingleTickerProviderSt
 
   Future<void> _deleteTransaction(TransactionModel tx) async {
     final deletedId = tx.transactionId;
-    setState(() {
-      _transactions.removeWhere((t) => t.transactionId == deletedId);
-    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        backgroundColor: ZivaTheme.bgSurface,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+          side: const BorderSide(color: ZivaTheme.gold400),
+        ),
+        content: Row(
+          children: [
+            const SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(strokeWidth: 2, color: ZivaTheme.gold400),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Deleting ${tx.merchantOrPayee} from BigQuery...',
+                style: const TextStyle(color: ZivaTheme.textPrimary, fontSize: 13),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
 
     try {
       await SqliteService.instance.deleteTransaction(deletedId);
       if (mounted) {
+        setState(() {
+          _transactions.removeWhere((t) => t.transactionId == deletedId);
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             backgroundColor: ZivaTheme.bgSurface,
@@ -465,6 +540,15 @@ class _LedgerScreenState extends State<LedgerScreen> with SingleTickerProviderSt
         );
       }
     } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: ZivaTheme.rose500,
+            behavior: SnackBarBehavior.floating,
+            content: Text('Failed to delete transaction from BigQuery: $e'),
+          ),
+        );
+      }
       debugPrint('Failed to delete transaction: $e');
     }
   }
@@ -586,8 +670,46 @@ class _LedgerScreenState extends State<LedgerScreen> with SingleTickerProviderSt
     );
 
     if (confirmed == true) {
-      await SqliteService.instance.deleteDebt(debt.id);
-      await _loadDebtsAndEnvelopes();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            backgroundColor: ZivaTheme.bgSurface,
+            content: Row(
+              children: [
+                SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: ZivaTheme.gold400),
+                ),
+                SizedBox(width: 10),
+                Text('Deleting debt entry from BigQuery Warehouse...', style: TextStyle(color: ZivaTheme.textPrimary)),
+              ],
+            ),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+      try {
+        await SqliteService.instance.deleteDebt(debt.id);
+        await _loadDebtsAndEnvelopes();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              backgroundColor: ZivaTheme.emerald500,
+              content: Text('Debt record deleted from BigQuery'),
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              backgroundColor: ZivaTheme.rose500,
+              content: Text('Failed to delete debt from BigQuery: $e'),
+            ),
+          );
+        }
+      }
     }
   }
 
@@ -772,12 +894,119 @@ class _LedgerScreenState extends State<LedgerScreen> with SingleTickerProviderSt
           style: const TextStyle(fontWeight: FontWeight.w700),
         ),
       ),
-      body: TabBarView(
-        controller: _tabController,
+      body: Column(
         children: [
-          _buildTransactionsTab(),
-          _buildDebtsTab(DebtDirection.owedByMe),
-          _buildDebtsTab(DebtDirection.owedToMe),
+          _buildBigQueryHealthBanner(),
+          Expanded(
+            child: TabBarView(
+              controller: _tabController,
+              children: [
+                _buildTransactionsTab(),
+                _buildDebtsTab(DebtDirection.owedByMe),
+                _buildDebtsTab(DebtDirection.owedToMe),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBigQueryHealthBanner() {
+    if (_isCheckingConnection) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        color: ZivaTheme.bgCard,
+        child: const Row(
+          children: [
+            SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(strokeWidth: 2, color: ZivaTheme.gold400),
+            ),
+            SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Verifying connection to BigQuery (budget-tracker-507418)...',
+                style: TextStyle(color: ZivaTheme.textMuted, fontSize: 12),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (!_isBigQueryConnected) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        color: ZivaTheme.rose500.withValues(alpha: 0.15),
+        child: Row(
+          children: [
+            const Icon(Icons.cloud_off_rounded, color: ZivaTheme.rose400, size: 18),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'BigQuery Warehouse Offline / Unreachable',
+                    style: TextStyle(color: ZivaTheme.rose400, fontSize: 12, fontWeight: FontWeight.bold),
+                  ),
+                  Text(
+                    _connectionError ?? 'Cannot reach backend proxy on port 3001. Write-back blocked.',
+                    style: const TextStyle(color: ZivaTheme.textMuted, fontSize: 11),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+            TextButton(
+              onPressed: _onRefresh,
+              style: TextButton.styleFrom(
+                foregroundColor: ZivaTheme.rose400,
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              ),
+              child: const Text('RETRY', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      decoration: BoxDecoration(
+        color: ZivaTheme.emerald500.withValues(alpha: 0.08),
+        border: Border(bottom: BorderSide(color: ZivaTheme.emerald500.withValues(alpha: 0.2))),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 8,
+            height: 8,
+            decoration: const BoxDecoration(
+              color: ZivaTheme.emerald400,
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 8),
+          const Expanded(
+            child: Text(
+              'BigQuery Write-Back Active • budget-tracker-507418.personal_finance (africa-south1)',
+              style: TextStyle(color: ZivaTheme.emerald400, fontSize: 11, fontWeight: FontWeight.w600),
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.refresh_rounded, size: 14, color: ZivaTheme.emerald400),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+            tooltip: 'Refresh BigQuery Cache',
+            onPressed: _onRefresh,
+          ),
         ],
       ),
     );
@@ -1731,6 +1960,7 @@ class _DebtFormSheet extends StatefulWidget {
 class _DebtFormSheetState extends State<_DebtFormSheet> {
   late DebtDirection _direction;
   DebtType _debtType = DebtType.personalLoan;
+  String _currency = 'USD';
   final _counterpartyCtrl = TextEditingController();
   final _amountCtrl = TextEditingController();
   final _interestRateCtrl = TextEditingController();
@@ -1769,6 +1999,7 @@ class _DebtFormSheetState extends State<_DebtFormSheet> {
       counterparty: name,
       direction: _direction,
       debtType: _debtType,
+      currency: _currency,
       originalPrincipalZar: amount,
       currentOutstandingBalanceZar: amount,
       interestRatePercent: double.tryParse(_interestRateCtrl.text),
@@ -1782,15 +2013,29 @@ class _DebtFormSheetState extends State<_DebtFormSheet> {
       updatedAt: DateTime.now(),
     );
 
-    await SqliteService.instance.saveDebt(debt);
-    if (mounted) {
-      Navigator.pop(context);
-      widget.onSaved();
+    try {
+      await SqliteService.instance.saveDebt(debt);
+      if (mounted) {
+        Navigator.pop(context);
+        widget.onSaved();
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isSaving = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: ZivaTheme.rose500,
+            content: Text('Failed to persist debt to BigQuery: $e'),
+          ),
+        );
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final currencySymbol = _currency == 'USD' ? '\$ ' : (_currency == 'ZWG' ? 'ZiG ' : 'R ');
+
     return Container(
       decoration: const BoxDecoration(
         color: ZivaTheme.bgSurface,
@@ -1866,13 +2111,36 @@ class _DebtFormSheetState extends State<_DebtFormSheet> {
 
             Row(
               children: [
+                // Currency Selector
+                SizedBox(
+                  width: 100,
+                  child: DropdownButtonFormField<String>(
+                    initialValue: _currency,
+                    dropdownColor: ZivaTheme.bgSurface,
+                    decoration: InputDecoration(
+                      labelText: 'Currency',
+                      filled: true,
+                      fillColor: ZivaTheme.bgCard,
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                    items: const [
+                      DropdownMenuItem(value: 'USD', child: Text('USD')),
+                      DropdownMenuItem(value: 'ZWG', child: Text('ZWG')),
+                      DropdownMenuItem(value: 'ZAR', child: Text('ZAR')),
+                    ],
+                    onChanged: (val) {
+                      if (val != null) setState(() => _currency = val);
+                    },
+                  ),
+                ),
+                const SizedBox(width: 10),
                 Expanded(
                   child: TextField(
                     controller: _amountCtrl,
                     keyboardType: const TextInputType.numberWithOptions(decimal: true),
                     decoration: InputDecoration(
-                      labelText: 'Principal Amount (ZAR)',
-                      prefixText: 'R ',
+                      labelText: 'Principal Amount',
+                      prefixText: currencySymbol,
                       filled: true,
                       fillColor: ZivaTheme.bgCard,
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
@@ -1885,7 +2153,7 @@ class _DebtFormSheetState extends State<_DebtFormSheet> {
                     controller: _interestRateCtrl,
                     keyboardType: const TextInputType.numberWithOptions(decimal: true),
                     decoration: InputDecoration(
-                      labelText: 'Interest Rate % (Optional)',
+                      labelText: 'Interest %',
                       suffixText: '%',
                       filled: true,
                       fillColor: ZivaTheme.bgCard,
@@ -1936,7 +2204,16 @@ class _DebtFormSheetState extends State<_DebtFormSheet> {
                   foregroundColor: Colors.black,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                 ),
-                child: Text(_isSaving ? 'Saving...' : 'Save Debt Record', style: const TextStyle(fontWeight: FontWeight.bold)),
+                child: _isSaving
+                    ? const Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black)),
+                          SizedBox(width: 10),
+                          Text('Writing to BigQuery Warehouse...', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black)),
+                        ],
+                      )
+                    : const Text('Save Debt Record', style: TextStyle(fontWeight: FontWeight.bold)),
               ),
             ),
           ],

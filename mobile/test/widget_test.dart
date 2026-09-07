@@ -2,9 +2,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ziva_finance/core/theme/ziva_theme.dart';
 import 'package:ziva_finance/services/sqlite_service.dart';
 import 'package:ziva_finance/models/transaction_model.dart';
+import 'test_api_helper.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  setUp(() {
+    SqliteService.instance.setApiForTesting(createMockApiService());
+  });
 
   test('ZivaTheme configuration smoke test', () {
     final theme = ZivaTheme.darkTheme;
