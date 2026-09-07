@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base href="/Ziva-finances/">
+  <script>
+    // Dynamically align base href with actual browser URL pathname to handle case variations
+    (function() {
+      var baseEl = document.querySelector('base');
+      if (baseEl && window.location && window.location.pathname) {
+        var path = window.location.pathname.toLowerCase();
+        if (path.indexOf('/ziva-finances') === 0) {
+          var seg = window.location.pathname.split('/')[1];
+          baseEl.setAttribute('href', '/' + seg + '/');
+        } else if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+          baseEl.setAttribute('href', '/');
+        } else {
+          baseEl.setAttribute('href', '/Ziva-finances/');
+        }
+      }
+    })();
+  </script>
+
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="description" content="Ziva Finance - Executive Wealth & Personal Budget Command Center">
+  <meta name="theme-color" content="#0B0E14">
+
+  <!-- iOS meta tags & icons -->
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Ziva Finance">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" href="favicon.png"/>
+
+  <title>Ziva Finance</title>
+  <link rel="manifest" href="manifest.json">
+</head>
+<body style="background-color: #0B0E14; margin: 0; padding: 0;">
+  <!-- Executive Instant Loading Splash -->
+  <div id="ziva-splash" style="position:fixed;top:0;left:0;width:100%;height:100%;background:#0B0E14;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:999999;font-family:system-ui,-apple-system,sans-serif;">
+    <div style="width:48px;height:48px;border-radius:50%;border:2px solid rgba(217,119,6,0.25);border-top-color:#D97706;animation:ziva-spin 1s linear infinite;margin-bottom:18px;"></div>
+    <div style="color:#F8FAFC;font-size:13px;font-weight:800;letter-spacing:2px;">ZIVA FINANCE</div>
+    <div style="color:#64748B;font-size:10px;letter-spacing:1px;margin-top:6px;">INITIALIZING EXECUTIVE TERMINAL...</div>
+  </div>
+  <style>
+    @keyframes ziva-spin {
+      to { transform: rotate(360deg); }
+    }
+  </style>
+  <script>
+    window.addEventListener('flutter-first-frame', function() {
+      var splash = document.getElementById('ziva-splash');
+      if (splash) {
+        splash.style.transition = 'opacity 0.4s ease';
+        splash.style.opacity = '0';
+        setTimeout(function() { splash.remove(); }, 400);
+      }
+    });
+  </script>
+
+  <script src="flutter_bootstrap.js" async></script>
+</body>
+</html>
