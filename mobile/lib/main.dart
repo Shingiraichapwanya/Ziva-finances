@@ -8,6 +8,8 @@ import 'features/auth/privacy_shield.dart';
 import 'features/dashboard/dashboard_screen.dart';
 import 'features/ledger/ledger_screen.dart';
 import 'features/settings/developer_settings_screen.dart';
+import 'core/layout/adaptive_layout.dart';
+import 'features/desktop/desktop_command_center.dart';
 import 'services/biometric_service.dart';
 import 'services/sync_engine.dart';
 
@@ -158,86 +160,100 @@ class _MainNavigationShellState extends State<MainNavigationShell> with WidgetsB
             },
           )
         else
-          Scaffold(
-            body: Column(
-              children: [
-                // Top Staging Advisory Banner
-                if (AppEnvironment.isStaging)
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                    color: const Color(0xFFF59E0B),
-                    child: const Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.warning_amber_rounded, size: 14, color: Colors.black),
-                        SizedBox(width: 8),
-                        Text(
-                          'STAGING SANDBOX ENVIRONMENT • MOCK TELEMETRY ACTIVE',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 1.1,
-                            color: Colors.black,
-                          ),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              // 1. DESKTOP WIDESCREEN COMMAND CENTER (>= 840px)
+              if (constraints.maxWidth >= AdaptiveLayout.desktopBreakpoint) {
+                return DesktopCommandCenter(
+                  onLogTransaction: () {
+                    // Quick modal entry
+                  },
+                );
+              }
+
+              // 2. MOBILE LEAN CAPTURE TOOL (< 840px)
+              return Scaffold(
+                body: Column(
+                  children: [
+                    // Top Staging Advisory Banner
+                    if (AppEnvironment.isStaging)
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                        color: const Color(0xFFF59E0B),
+                        child: const Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.warning_amber_rounded, size: 14, color: Colors.black),
+                            SizedBox(width: 8),
+                            Text(
+                              'STAGING SANDBOX ENVIRONMENT • MOCK TELEMETRY ACTIVE',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 1.1,
+                                color: Colors.black,
+                              ),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
-                  ),
-                Expanded(
-                  child: IndexedStack(
-                    index: _currentTabIndex,
-                    children: [
-                      DashboardScreen(
-                        onNavigateToLedger: () => setState(() => _currentTabIndex = 1),
                       ),
-                      const LedgerScreen(),
-                      const DeveloperSettingsScreen(),
+                    Expanded(
+                      child: IndexedStack(
+                        index: _currentTabIndex,
+                        children: [
+                          DashboardScreen(
+                            onNavigateToLedger: () => setState(() => _currentTabIndex = 1),
+                          ),
+                          const LedgerScreen(),
+                          const DeveloperSettingsScreen(),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                bottomNavigationBar: Container(
+                  decoration: const BoxDecoration(
+                    color: ZivaTheme.bgSurface,
+                    border: Border(top: BorderSide(color: ZivaTheme.borderCard)),
+                  ),
+                  child: NavigationBar(
+                    selectedIndex: _currentTabIndex,
+                    backgroundColor: ZivaTheme.bgSurface,
+                    indicatorColor: ZivaTheme.gold500.withValues(alpha: 0.2),
+                    onDestinationSelected: (idx) => setState(() => _currentTabIndex = idx),
+                    destinations: [
+                      const NavigationDestination(
+                        icon: Icon(Icons.dashboard_outlined, color: ZivaTheme.textMuted),
+                        selectedIcon: Icon(Icons.dashboard_rounded, color: ZivaTheme.gold400),
+                        label: 'Dashboard',
+                      ),
+                      NavigationDestination(
+                        icon: ValueListenableBuilder<int>(
+                          valueListenable: SyncEngine.instance.pendingCount,
+                          builder: (context, count, _) {
+                            return Badge(
+                              isLabelVisible: count > 0,
+                              label: Text('$count', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
+                              backgroundColor: ZivaTheme.gold500,
+                              textColor: Colors.black,
+                              child: const Icon(Icons.receipt_long_outlined, color: ZivaTheme.textMuted),
+                            );
+                          },
+                        ),
+                        selectedIcon: const Icon(Icons.receipt_long_rounded, color: ZivaTheme.gold400),
+                        label: 'Ledger',
+                      ),
+                      const NavigationDestination(
+                        icon: Icon(Icons.tune_outlined, color: ZivaTheme.textMuted),
+                        selectedIcon: Icon(Icons.tune_rounded, color: ZivaTheme.gold400),
+                        label: 'Dev & OTA',
+                      ),
                     ],
                   ),
                 ),
-              ],
-            ),
-            bottomNavigationBar: Container(
-              decoration: const BoxDecoration(
-                color: ZivaTheme.bgSurface,
-                border: Border(top: BorderSide(color: ZivaTheme.borderCard)),
-              ),
-              child: NavigationBar(
-                selectedIndex: _currentTabIndex,
-                backgroundColor: ZivaTheme.bgSurface,
-                indicatorColor: ZivaTheme.gold500.withValues(alpha: 0.2),
-                onDestinationSelected: (idx) => setState(() => _currentTabIndex = idx),
-                destinations: [
-                  const NavigationDestination(
-                    icon: Icon(Icons.dashboard_outlined, color: ZivaTheme.textMuted),
-                    selectedIcon: Icon(Icons.dashboard_rounded, color: ZivaTheme.gold400),
-                    label: 'Dashboard',
-                  ),
-                  NavigationDestination(
-                    icon: ValueListenableBuilder<int>(
-                      valueListenable: SyncEngine.instance.pendingCount,
-                      builder: (context, count, _) {
-                        return Badge(
-                          isLabelVisible: count > 0,
-                          label: Text('$count', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
-                          backgroundColor: ZivaTheme.gold500,
-                          textColor: Colors.black,
-                          child: const Icon(Icons.receipt_long_outlined, color: ZivaTheme.textMuted),
-                        );
-                      },
-                    ),
-                    selectedIcon: const Icon(Icons.receipt_long_rounded, color: ZivaTheme.gold400),
-                    label: 'Ledger',
-                  ),
-                  const NavigationDestination(
-                    icon: Icon(Icons.tune_outlined, color: ZivaTheme.textMuted),
-                    selectedIcon: Icon(Icons.tune_rounded, color: ZivaTheme.gold400),
-                    label: 'Dev & OTA',
-                  ),
-                ],
-              ),
-            ),
+              );
+            },
           ),
 
         // iOS Multitasking App Switcher Privacy Masking Shield
