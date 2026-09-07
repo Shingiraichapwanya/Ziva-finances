@@ -8,8 +8,6 @@ import 'features/auth/privacy_shield.dart';
 import 'features/dashboard/dashboard_screen.dart';
 import 'features/ledger/ledger_screen.dart';
 import 'features/settings/developer_settings_screen.dart';
-import 'core/layout/adaptive_layout.dart';
-import 'features/desktop/desktop_command_center.dart';
 import 'services/biometric_service.dart';
 import 'services/sync_engine.dart';
 
@@ -162,16 +160,8 @@ class _MainNavigationShellState extends State<MainNavigationShell> with WidgetsB
         else
           LayoutBuilder(
             builder: (context, constraints) {
-              // 1. DESKTOP WIDESCREEN COMMAND CENTER (>= 840px)
-              if (constraints.maxWidth >= AdaptiveLayout.desktopBreakpoint) {
-                return DesktopCommandCenter(
-                  onLogTransaction: () {
-                    // Quick modal entry
-                  },
-                );
-              }
+              final isDesktop = constraints.maxWidth >= 800;
 
-              // 2. MOBILE LEAN CAPTURE TOOL (< 840px)
               return Scaffold(
                 body: Column(
                   children: [
@@ -204,6 +194,7 @@ class _MainNavigationShellState extends State<MainNavigationShell> with WidgetsB
                         children: [
                           DashboardScreen(
                             onNavigateToLedger: () => setState(() => _currentTabIndex = 1),
+                            onNavigateToSettings: () => setState(() => _currentTabIndex = 2),
                           ),
                           const LedgerScreen(),
                           const DeveloperSettingsScreen(),
@@ -212,46 +203,48 @@ class _MainNavigationShellState extends State<MainNavigationShell> with WidgetsB
                     ),
                   ],
                 ),
-                bottomNavigationBar: Container(
-                  decoration: const BoxDecoration(
-                    color: ZivaTheme.bgSurface,
-                    border: Border(top: BorderSide(color: ZivaTheme.borderCard)),
-                  ),
-                  child: NavigationBar(
-                    selectedIndex: _currentTabIndex,
-                    backgroundColor: ZivaTheme.bgSurface,
-                    indicatorColor: ZivaTheme.gold500.withValues(alpha: 0.2),
-                    onDestinationSelected: (idx) => setState(() => _currentTabIndex = idx),
-                    destinations: [
-                      const NavigationDestination(
-                        icon: Icon(Icons.dashboard_outlined, color: ZivaTheme.textMuted),
-                        selectedIcon: Icon(Icons.dashboard_rounded, color: ZivaTheme.gold400),
-                        label: 'Dashboard',
-                      ),
-                      NavigationDestination(
-                        icon: ValueListenableBuilder<int>(
-                          valueListenable: SyncEngine.instance.pendingCount,
-                          builder: (context, count, _) {
-                            return Badge(
-                              isLabelVisible: count > 0,
-                              label: Text('$count', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
-                              backgroundColor: ZivaTheme.gold500,
-                              textColor: Colors.black,
-                              child: const Icon(Icons.receipt_long_outlined, color: ZivaTheme.textMuted),
-                            );
-                          },
+                bottomNavigationBar: isDesktop
+                    ? null
+                    : Container(
+                        decoration: const BoxDecoration(
+                          color: ZivaTheme.bgSurface,
+                          border: Border(top: BorderSide(color: ZivaTheme.borderCard)),
                         ),
-                        selectedIcon: const Icon(Icons.receipt_long_rounded, color: ZivaTheme.gold400),
-                        label: 'Ledger',
+                        child: NavigationBar(
+                          selectedIndex: _currentTabIndex,
+                          backgroundColor: ZivaTheme.bgSurface,
+                          indicatorColor: ZivaTheme.gold500.withValues(alpha: 0.2),
+                          onDestinationSelected: (idx) => setState(() => _currentTabIndex = idx),
+                          destinations: [
+                            const NavigationDestination(
+                              icon: Icon(Icons.dashboard_outlined, color: ZivaTheme.textMuted),
+                              selectedIcon: Icon(Icons.dashboard_rounded, color: ZivaTheme.gold400),
+                              label: 'Dashboard',
+                            ),
+                            NavigationDestination(
+                              icon: ValueListenableBuilder<int>(
+                                valueListenable: SyncEngine.instance.pendingCount,
+                                builder: (context, count, _) {
+                                  return Badge(
+                                    isLabelVisible: count > 0,
+                                    label: Text('$count', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
+                                    backgroundColor: ZivaTheme.gold500,
+                                    textColor: Colors.black,
+                                    child: const Icon(Icons.receipt_long_outlined, color: ZivaTheme.textMuted),
+                                  );
+                                },
+                              ),
+                              selectedIcon: const Icon(Icons.receipt_long_rounded, color: ZivaTheme.gold400),
+                              label: 'Ledger',
+                            ),
+                            const NavigationDestination(
+                              icon: Icon(Icons.tune_outlined, color: ZivaTheme.textMuted),
+                              selectedIcon: Icon(Icons.tune_rounded, color: ZivaTheme.gold400),
+                              label: 'Dev & OTA',
+                            ),
+                          ],
+                        ),
                       ),
-                      const NavigationDestination(
-                        icon: Icon(Icons.tune_outlined, color: ZivaTheme.textMuted),
-                        selectedIcon: Icon(Icons.tune_rounded, color: ZivaTheme.gold400),
-                        label: 'Dev & OTA',
-                      ),
-                    ],
-                  ),
-                ),
               );
             },
           ),

@@ -20,6 +20,10 @@ class CurrencyFormatter {
     }
   }
 
+  static String format(double amount, String currency) {
+    return formatAmount(amount, currency: currency);
+  }
+
   // Cross currency conversion using effective standard rates
   static double convert({
     required double amount,

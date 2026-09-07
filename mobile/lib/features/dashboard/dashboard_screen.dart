@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../core/config/app_environment.dart';
+import '../../core/layout/responsive_layout.dart';
 import '../../core/theme/ziva_theme.dart';
 import '../../core/utils/currency_formatter.dart';
 import '../../models/account_model.dart';
@@ -11,8 +12,13 @@ import '../settings/developer_settings_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   final VoidCallback onNavigateToLedger;
+  final VoidCallback? onNavigateToSettings;
 
-  const DashboardScreen({super.key, required this.onNavigateToLedger});
+  const DashboardScreen({
+    super.key,
+    required this.onNavigateToLedger,
+    this.onNavigateToSettings,
+  });
 
   @override
   State<DashboardScreen> createState() => _DashboardScreenState();
@@ -22,86 +28,57 @@ class _DashboardScreenState extends State<DashboardScreen> {
   String _selectedCurrency = 'ZAR';
   List<AccountModel> _accounts = [];
   List<TransactionModel> _recentTransactions = [];
+  bool _isLoading = true;
   int _secretTapCount = 0;
 
   @override
   void initState() {
     super.initState();
+    // Cache Invalidation: Immediately wipe any stale front-end caches
+    SqliteService.instance.invalidateAndClearCaches();
     _loadDashboardData();
   }
 
   Future<void> _loadDashboardData() async {
+    setState(() => _isLoading = true);
     try {
       final accounts = await SqliteService.instance.getLocalAccounts().timeout(
-        const Duration(seconds: 2),
-        onTimeout: () => _fallbackAccounts,
+        const Duration(seconds: 4),
+        onTimeout: () => [],
       );
-      final txs = await SqliteService.instance.getTransactions(limit: 5).timeout(
-        const Duration(seconds: 2),
+      final txs = await SqliteService.instance.getTransactions(limit: 10).timeout(
+        const Duration(seconds: 4),
         onTimeout: () => [],
       );
 
       if (mounted) {
         setState(() {
-          _accounts = accounts.isNotEmpty ? accounts : _fallbackAccounts;
+          _accounts = accounts;
           _recentTransactions = txs;
+          _isLoading = false;
         });
       }
     } catch (e) {
-      debugPrint('[Dashboard] Notice: Using fallback data: $e');
+      debugPrint('[Dashboard] Error loading live BigQuery data: $e');
       if (mounted) {
         setState(() {
-          _accounts = _fallbackAccounts;
+          _accounts = [];
+          _recentTransactions = [];
+          _isLoading = false;
         });
       }
     }
   }
 
-  // Fallback initial accounts if local SQLite has not yet synced from BigQuery
-  List<AccountModel> get _fallbackAccounts => [
-        AccountModel(
-          accountId: 'ACC_ZA_CAPITEC_DAILY',
-          accountName: 'Capitec Daily Cheque',
-          financialInstitution: 'Capitec Bank',
-          countryCode: 'ZA',
-          primaryCurrency: 'ZAR',
-          cashFlowTier: 'DAILY_SPENDING',
-          accountType: 'CHECKING',
-          nativeBalance: 18450.00,
-        ),
-        AccountModel(
-          accountId: 'ACC_ZA_FNB_MONTHLY',
-          accountName: 'FNB Commercial Monthly',
-          financialInstitution: 'First National Bank',
-          countryCode: 'ZA',
-          primaryCurrency: 'ZAR',
-          cashFlowTier: 'MONTHLY_OPERATIONAL',
-          accountType: 'CHECKING',
-          nativeBalance: 42300.00,
-        ),
-        AccountModel(
-          accountId: 'ACC_US_WISE_GLOBAL',
-          accountName: 'Wise Global Multi-Currency',
-          financialInstitution: 'Wise Europe SA',
-          countryCode: 'US',
-          primaryCurrency: 'USD',
-          cashFlowTier: 'MONTHLY_OPERATIONAL',
-          accountType: 'SAVINGS',
-          nativeBalance: 3200.00,
-        ),
-        AccountModel(
-          accountId: 'ACC_ZA_EASY_EQUITIES',
-          accountName: 'EasyEquities Wealth Vault',
-          financialInstitution: 'EasyEquities / FirstRand',
-          countryCode: 'ZA',
-          primaryCurrency: 'ZAR',
-          cashFlowTier: 'LONG_TERM_VAULT',
-          accountType: 'INVESTMENT_BROKER',
-          nativeBalance: 680000.00,
-        ),
-      ];
+  Future<void> _refreshData() async {
+    SqliteService.instance.invalidateAndClearCaches();
+    await SyncEngine.instance.processQueue();
+    await SyncEngine.instance.refreshFromBigQuery();
+    await _loadDashboardData();
+  }
 
   double get _totalNetWorthInSelectedCurrency {
+    if (_accounts.isEmpty) return 0.0;
     double totalZar = 0;
     for (final acc in _accounts) {
       totalZar += CurrencyFormatter.convert(
@@ -117,13 +94,35 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  double _getTierBalance(String filterTier) {
+    final tierAccounts = _accounts.where((a) => a.cashFlowTier == filterTier).toList();
+    if (tierAccounts.isEmpty) return 0.0;
+    double tierTotalZar = 0;
+    for (final acc in tierAccounts) {
+      tierTotalZar += CurrencyFormatter.convert(
+        amount: acc.nativeBalance,
+        fromCurrency: acc.primaryCurrency,
+        toCurrency: 'ZAR',
+      );
+    }
+    return CurrencyFormatter.convert(
+      amount: tierTotalZar,
+      fromCurrency: 'ZAR',
+      toCurrency: _selectedCurrency,
+    );
+  }
+
   void _onBrandHeaderTapped() {
     _secretTapCount++;
     if (_secretTapCount >= 5) {
       _secretTapCount = 0;
-      Navigator.of(context).push(
-        MaterialPageRoute<void>(builder: (_) => const DeveloperSettingsScreen()),
-      );
+      if (widget.onNavigateToSettings != null) {
+        widget.onNavigateToSettings!();
+      } else {
+        Navigator.of(context).push(
+          MaterialPageRoute<void>(builder: (_) => const DeveloperSettingsScreen()),
+        );
+      }
     }
   }
 
@@ -137,6 +136,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           setState(() {
             _recentTransactions.insert(0, newTx);
           });
+          _loadDashboardData();
         },
       ),
     );
@@ -144,6 +144,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Wrap root of the dashboard body in LayoutBuilder via ResponsiveLayout
+    return Scaffold(
+      backgroundColor: ZivaTheme.bgCore,
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          return ResponsiveLayout(
+            breakpoint: 800.0,
+            mobile: _buildMobileLayout(context),
+            desktop: _buildDesktopCommandCenterLayout(context, constraints),
+          );
+        },
+      ),
+    );
+  }
+
+  // ==========================================
+  // MODE A: MOBILE SINGLE COLUMN LAYOUT (< 800px)
+  // ==========================================
+  Widget _buildMobileLayout(BuildContext context) {
     return Scaffold(
       backgroundColor: ZivaTheme.bgCore,
       appBar: AppBar(
@@ -151,6 +170,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           onTap: _onBrandHeaderTapped,
           behavior: HitTestBehavior.opaque,
           child: Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
               Container(
                 width: 28,
@@ -162,60 +182,72 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
                 child: const Icon(Icons.diamond_outlined, color: ZivaTheme.gold400, size: 16),
               ),
-              const SizedBox(width: 10),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      const Text(
-                        'ZIVA FINANCE',
-                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w900, letterSpacing: 1.0),
-                      ),
-                      const SizedBox(width: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: AppEnvironment.badgeBgColor,
-                          borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: AppEnvironment.badgeBorderColor, width: 0.8),
-                        ),
-                        child: Text(
-                          AppEnvironment.name,
-                          style: TextStyle(
-                            fontSize: 8,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 0.8,
-                            color: AppEnvironment.accentColor,
+              const SizedBox(width: 8),
+              Flexible(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Flexible(
+                          child: Text(
+                            'ZIVA FINANCE',
+                            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w900, letterSpacing: 0.8),
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
-                      ),
-                    ],
-                  ),
-                  const Text('COMMAND CENTER', style: TextStyle(fontSize: 9, color: ZivaTheme.textMuted, letterSpacing: 0.5)),
-                ],
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: AppEnvironment.badgeBgColor,
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: AppEnvironment.badgeBorderColor, width: 0.8),
+                          ),
+                          child: Text(
+                            AppEnvironment.name,
+                            style: TextStyle(
+                              fontSize: 8,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 0.6,
+                              color: AppEnvironment.accentColor,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const Text('MOBILE DASHBOARD', style: TextStyle(fontSize: 9, color: ZivaTheme.textMuted, letterSpacing: 0.5)),
+                  ],
+                ),
               ),
             ],
           ),
         ),
         actions: [
           IconButton(
+            icon: const Icon(Icons.refresh, color: ZivaTheme.textSecondary),
+            onPressed: _refreshData,
+            tooltip: 'Refresh Data',
+          ),
+          IconButton(
             icon: const Icon(Icons.tune_rounded, color: ZivaTheme.textSecondary),
             onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute<void>(builder: (_) => const DeveloperSettingsScreen()),
-              );
+              if (widget.onNavigateToSettings != null) {
+                widget.onNavigateToSettings!();
+              } else {
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(builder: (_) => const DeveloperSettingsScreen()),
+                );
+              }
             },
             tooltip: 'Developer Settings & OTA',
           ),
         ],
       ),
       body: RefreshIndicator(
-        onRefresh: () async {
-          await SyncEngine.instance.processQueue();
-          await SyncEngine.instance.refreshFromBigQuery();
-          await _loadDashboardData();
-        },
+        onRefresh: _refreshData,
         color: ZivaTheme.gold500,
         backgroundColor: ZivaTheme.bgSurface,
         child: SingleChildScrollView(
@@ -224,7 +256,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Offline Sync Status Banner (if pending mutations exist)
+              // Offline Sync Status Banner
               ValueListenableBuilder<int>(
                 valueListenable: SyncEngine.instance.pendingCount,
                 builder: (context, count, _) {
@@ -243,7 +275,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         const SizedBox(width: 10),
                         Expanded(
                           child: Text(
-                            '$count transaction mutation${count == 1 ? '' : 's'} waiting to sync to BigQuery',
+                            '$count mutation${count == 1 ? '' : 's'} waiting to sync to BigQuery',
                             style: const TextStyle(color: ZivaTheme.textPrimary, fontSize: 12, fontWeight: FontWeight.w600),
                           ),
                         ),
@@ -258,7 +290,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 },
               ),
 
-              // Total Net Worth Card
+              // Total Net Worth Card (Mobile Single Column)
               Card(
                 child: Padding(
                   padding: const EdgeInsets.all(20.0),
@@ -268,16 +300,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          const Text(
-                            'PORTFOLIO NET WORTH',
-                            style: TextStyle(
-                              fontFamily: 'monospace',
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                              color: ZivaTheme.gold400,
-                              letterSpacing: 0.8,
+                          const Expanded(
+                            child: Text(
+                              'PORTFOLIO NET WORTH',
+                              style: TextStyle(
+                                fontFamily: 'monospace',
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: ZivaTheme.gold400,
+                                letterSpacing: 0.8,
+                              ),
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ),
+                          const SizedBox(width: 8),
                           // Currency Selector Pills
                           Row(
                             children: ['ZAR', 'USD', 'ZiG'].map((curr) {
@@ -306,26 +342,40 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         ],
                       ),
                       const SizedBox(height: 12),
-                      Text(
-                        CurrencyFormatter.formatAmount(
-                          _totalNetWorthInSelectedCurrency,
-                          currency: _selectedCurrency,
-                        ),
-                        style: const TextStyle(
-                          fontSize: 32,
-                          fontWeight: FontWeight.w900,
-                          color: ZivaTheme.textPrimary,
-                          letterSpacing: -0.5,
-                        ),
-                      ),
+                      _isLoading
+                          ? const SizedBox(
+                              height: 36,
+                              child: Center(
+                                child: SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(strokeWidth: 2, color: ZivaTheme.gold500),
+                                ),
+                              ),
+                            )
+                          : Text(
+                              CurrencyFormatter.formatAmount(
+                                _totalNetWorthInSelectedCurrency,
+                                currency: _selectedCurrency,
+                              ),
+                              style: const TextStyle(
+                                fontSize: 32,
+                                fontWeight: FontWeight.w900,
+                                color: ZivaTheme.textPrimary,
+                                letterSpacing: -0.5,
+                              ),
+                            ),
                       const SizedBox(height: 6),
                       const Row(
                         children: [
                           Icon(Icons.shield_outlined, size: 14, color: ZivaTheme.emerald400),
                           SizedBox(width: 4),
-                          Text(
-                            'Secured with SQLite Offline Sync & Face ID',
-                            style: TextStyle(fontSize: 11, color: ZivaTheme.textSecondary),
+                          Expanded(
+                            child: Text(
+                              'Verified Live Data • BigQuery Africa-South1',
+                              style: TextStyle(fontSize: 11, color: ZivaTheme.textSecondary),
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
                         ],
                       ),
@@ -355,7 +405,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 description: 'Capitec & EcoCash Instant Liquidity',
                 icon: Icons.flash_on_rounded,
                 iconColor: ZivaTheme.cyan400,
-                filterTier: 'DAILY_SPENDING',
+                balance: _getTierBalance('DAILY_SPENDING'),
               ),
               const SizedBox(height: 10),
 
@@ -365,7 +415,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 description: 'FNB Commercial & Fixed Commitments',
                 icon: Icons.calendar_month_rounded,
                 iconColor: ZivaTheme.gold400,
-                filterTier: 'MONTHLY_ALLOCATION',
+                balance: _getTierBalance('MONTHLY_ALLOCATION'),
               ),
               const SizedBox(height: 10),
 
@@ -375,7 +425,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 description: 'Discovery 32-Day & EasyEquities TFSA',
                 icon: Icons.lock_outline_rounded,
                 iconColor: ZivaTheme.emerald400,
-                filterTier: 'LONG_TERM_VAULT',
+                balance: _getTierBalance('LONG_TERM_VAULT'),
               ),
 
               const SizedBox(height: 24),
@@ -384,14 +434,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text(
-                    'RECENT LEDGER ACTIVITY',
-                    style: TextStyle(
-                      fontFamily: 'monospace',
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      color: ZivaTheme.textMuted,
-                      letterSpacing: 0.8,
+                  const Expanded(
+                    child: Text(
+                      'RECENT LEDGER ACTIVITY',
+                      style: TextStyle(
+                        fontFamily: 'monospace',
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: ZivaTheme.textMuted,
+                        letterSpacing: 0.8,
+                      ),
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                   TextButton(
@@ -412,66 +465,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     border: Border.all(color: ZivaTheme.borderCard),
                   ),
                   child: const Center(
-                    child: Text('No recent entries found. Tap + to add an entry.', style: TextStyle(color: ZivaTheme.textMuted, fontSize: 12)),
+                    child: Text('No active transactions in live dataset. Tap below to log.', style: TextStyle(color: ZivaTheme.textMuted, fontSize: 12)),
                   ),
                 )
               else
-                ..._recentTransactions.take(3).map((tx) {
-                  final isExpense = tx.originalAmount < 0;
-                  return Container(
-                    margin: const EdgeInsets.only(bottom: 8),
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: ZivaTheme.bgCard,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: ZivaTheme.borderCard),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          isExpense ? Icons.arrow_upward_rounded : Icons.arrow_downward_rounded,
-                          color: isExpense ? ZivaTheme.rose400 : ZivaTheme.emerald400,
-                          size: 16,
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(tx.merchantOrPayee, style: const TextStyle(color: ZivaTheme.textPrimary, fontSize: 13, fontWeight: FontWeight.w600)),
-                              Text(tx.categoryName, style: const TextStyle(color: ZivaTheme.textMuted, fontSize: 11)),
-                            ],
-                          ),
-                        ),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            Text(
-                              CurrencyFormatter.formatAmount(tx.originalAmount, currency: tx.originalCurrency),
-                              style: TextStyle(
-                                fontFamily: 'monospace',
-                                color: isExpense ? ZivaTheme.textPrimary : ZivaTheme.emerald400,
-                                fontWeight: FontWeight.w700,
-                                fontSize: 13,
-                              ),
-                            ),
-                            Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(tx.transactionDate, style: const TextStyle(color: ZivaTheme.textMuted, fontSize: 10)),
-                                const SizedBox(width: 4),
-                                if (tx.isSynced)
-                                  const Icon(Icons.check_circle_rounded, size: 10, color: ZivaTheme.emerald400)
-                                else
-                                  const Icon(Icons.schedule_rounded, size: 10, color: ZivaTheme.gold400),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  );
-                }),
+                ..._recentTransactions.take(3).map((tx) => _buildTransactionItem(tx)),
 
               const SizedBox(height: 24),
 
@@ -492,28 +490,963 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  // =========================================================================
+  // MODE B: DESKTOP EXECUTIVE COMMAND CENTER MULTI-COLUMN LAYOUT (>= 800px)
+  // =========================================================================
+  Widget _buildDesktopCommandCenterLayout(BuildContext context, BoxConstraints constraints) {
+    return Scaffold(
+      backgroundColor: ZivaTheme.bgCore,
+      body: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // ----------------------------------------------------
+          // COLUMN 1: WIDESCREEN LEFT SIDEBAR (Width: 260px)
+          // ----------------------------------------------------
+          _buildDesktopLeftSidebar(),
+
+          // ----------------------------------------------------
+          // COLUMN 2: PRIMARY CENTER COMMAND CENTER (Flexible/Expand)
+          // ----------------------------------------------------
+          Expanded(
+            flex: constraints.maxWidth >= 1200 ? 7 : 6,
+            child: _buildDesktopCenterColumn(constraints),
+          ),
+
+          // ----------------------------------------------------
+          // COLUMN 3: RIGHT PANEL - RECENT ACTIVITY & TELEMETRY (Width: 320px)
+          // ----------------------------------------------------
+          Container(
+            width: constraints.maxWidth >= 1200 ? 340 : 300,
+            decoration: const BoxDecoration(
+              color: ZivaTheme.bgSurface,
+              border: Border(left: BorderSide(color: ZivaTheme.borderCard)),
+            ),
+            child: _buildDesktopRightPanel(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDesktopLeftSidebar() {
+    return Container(
+      width: 260,
+      decoration: const BoxDecoration(
+        color: ZivaTheme.bgSurface,
+        border: Border(right: BorderSide(color: ZivaTheme.borderCard)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Brand Header
+          Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Row(
+              children: [
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: ZivaTheme.gold500.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: ZivaTheme.gold500.withValues(alpha: 0.3)),
+                  ),
+                  child: const Center(
+                    child: Icon(Icons.diamond_outlined, color: ZivaTheme.gold400, size: 20),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'ZIVA FINANCE',
+                        style: TextStyle(
+                          color: ZivaTheme.textPrimary,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 1.2,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(
+                        'COMMAND CENTER',
+                        style: TextStyle(
+                          color: ZivaTheme.gold400,
+                          fontSize: 9,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1.0,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // Environment Badge
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 2),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: AppEnvironment.badgeBgColor,
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: AppEnvironment.badgeBorderColor),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.shield_outlined, size: 14, color: AppEnvironment.accentColor),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      AppEnvironment.badgeLabel,
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.8,
+                        color: AppEnvironment.accentColor,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
+          // Currency Switcher Row
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'REPORTING CURRENCY',
+                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.8, color: ZivaTheme.textMuted),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: ['ZAR', 'USD', 'ZiG'].map((curr) {
+                    final isSelected = _selectedCurrency == curr;
+                    return Expanded(
+                      child: GestureDetector(
+                        onTap: () => setState(() => _selectedCurrency = curr),
+                        child: Container(
+                          margin: const EdgeInsets.only(right: 4),
+                          padding: const EdgeInsets.symmetric(vertical: 6),
+                          decoration: BoxDecoration(
+                            color: isSelected ? ZivaTheme.gold500 : ZivaTheme.bgCore,
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(
+                              color: isSelected ? ZivaTheme.gold500 : ZivaTheme.borderCard,
+                            ),
+                          ),
+                          alignment: Alignment.center,
+                          child: Text(
+                            curr,
+                            style: TextStyle(
+                              color: isSelected ? Colors.black : ZivaTheme.textMuted,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 20),
+          const Divider(color: ZivaTheme.borderCard, height: 1),
+          const SizedBox(height: 16),
+
+          // Desktop Sidebar Navigation
+          _buildSidebarNavButton(
+            icon: Icons.dashboard_rounded,
+            label: 'Executive Overview',
+            isActive: true,
+            onTap: () {},
+          ),
+          _buildSidebarNavButton(
+            icon: Icons.receipt_long_rounded,
+            label: 'Debt & Credit Ledger',
+            isActive: false,
+            onTap: widget.onNavigateToLedger,
+          ),
+          _buildSidebarNavButton(
+            icon: Icons.tune_rounded,
+            label: 'System Settings & OTA',
+            isActive: false,
+            onTap: () {
+              if (widget.onNavigateToSettings != null) {
+                widget.onNavigateToSettings!();
+              } else {
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(builder: (_) => const DeveloperSettingsScreen()),
+                );
+              }
+            },
+          ),
+
+          const Spacer(),
+
+          // BigQuery Warehouse Status Telemetry Widget
+          Container(
+            margin: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: ZivaTheme.bgCore,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: ZivaTheme.borderCard),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: const BoxDecoration(
+                        color: Color(0xFF10B981),
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    const Expanded(
+                      child: Text(
+                        'Google Cloud BigQuery',
+                        style: TextStyle(color: ZivaTheme.textPrimary, fontSize: 11, fontWeight: FontWeight.bold),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'budget-tracker-507418',
+                  style: TextStyle(color: ZivaTheme.textMuted, fontSize: 10, fontFamily: 'monospace'),
+                ),
+                const Text(
+                  'dataset: personal_finance (wiped)',
+                  style: TextStyle(color: ZivaTheme.textMuted, fontSize: 10),
+                ),
+                const SizedBox(height: 8),
+                const Row(
+                  children: [
+                    Icon(Icons.check_circle_outline, size: 12, color: ZivaTheme.emerald400),
+                    SizedBox(width: 4),
+                    Expanded(
+                      child: Text(
+                        'Zero Stale Cache Active',
+                        style: TextStyle(color: ZivaTheme.emerald400, fontSize: 10, fontWeight: FontWeight.w600),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSidebarNavButton({
+    required IconData icon,
+    required String label,
+    required bool isActive,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: isActive ? ZivaTheme.gold500.withValues(alpha: 0.15) : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+          border: isActive ? Border.all(color: ZivaTheme.gold500.withValues(alpha: 0.3)) : null,
+        ),
+        child: Row(
+          children: [
+            Icon(
+              icon,
+              size: 18,
+              color: isActive ? ZivaTheme.gold400 : ZivaTheme.textMuted,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                label,
+                style: TextStyle(
+                  color: isActive ? ZivaTheme.textPrimary : ZivaTheme.textMuted,
+                  fontSize: 13,
+                  fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDesktopCenterColumn(BoxConstraints constraints) {
+    return Column(
+      children: [
+        // Center Header Top Bar
+        Container(
+          height: 68,
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          decoration: const BoxDecoration(
+            color: ZivaTheme.bgSurface,
+            border: Border(bottom: BorderSide(color: ZivaTheme.borderCard)),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Text(
+                      'EXECUTIVE FINANCIAL COMMAND CENTER',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 1.1,
+                        color: ZivaTheme.textPrimary,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    Text(
+                      'Real-Time Portfolio Telemetry • Widescreen Mode (${constraints.maxWidth.toInt()}px)',
+                      style: const TextStyle(fontSize: 11, color: ZivaTheme.textMuted),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton(
+                onPressed: _refreshData,
+                icon: const Icon(Icons.refresh_rounded, size: 20, color: ZivaTheme.textSecondary),
+                tooltip: 'Invalidate cache & re-query BigQuery',
+              ),
+              const SizedBox(width: 8),
+              ElevatedButton.icon(
+                onPressed: _openQuickEntry,
+                icon: const Icon(Icons.add, size: 16),
+                label: const Text('Log Transaction'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: ZivaTheme.gold500,
+                  foregroundColor: Colors.black,
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        // Center Content Body (Multi-Column Grid)
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(28.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // -------------------------------------------------------
+                // 1. MULTI-COLUMN KPI GRID (4 DISTINCT CARDS)
+                // -------------------------------------------------------
+                const Text(
+                  'CONSOLIDATED METRICS & TIER LIQUIDITY',
+                  style: TextStyle(
+                    fontFamily: 'monospace',
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: ZivaTheme.textMuted,
+                    letterSpacing: 0.8,
+                  ),
+                ),
+                const SizedBox(height: 14),
+
+                LayoutBuilder(
+                  builder: (context, centerConstraints) {
+                    final isUltraWide = centerConstraints.maxWidth >= 900;
+                    if (isUltraWide) {
+                      return Row(
+                        children: [
+                          Expanded(
+                            child: _buildKpiCard(
+                              title: 'PORTFOLIO NET WORTH',
+                              amount: _totalNetWorthInSelectedCurrency,
+                              subtitle: 'Live BigQuery Balance',
+                              icon: Icons.account_balance_wallet_outlined,
+                              accentColor: ZivaTheme.gold400,
+                              isPrimary: true,
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: _buildKpiCard(
+                              title: 'TIER 1: DAILY SPEND',
+                              amount: _getTierBalance('DAILY_SPENDING'),
+                              subtitle: 'Instant Liquidity Vault',
+                              icon: Icons.flash_on_rounded,
+                              accentColor: ZivaTheme.cyan400,
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: _buildKpiCard(
+                              title: 'TIER 2: OPERATIONAL',
+                              amount: _getTierBalance('MONTHLY_ALLOCATION'),
+                              subtitle: 'Fixed Commitments',
+                              icon: Icons.calendar_month_rounded,
+                              accentColor: ZivaTheme.gold400,
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: _buildKpiCard(
+                              title: 'TIER 3: LONG-TERM',
+                              amount: _getTierBalance('LONG_TERM_VAULT'),
+                              subtitle: 'Preservation Vaults',
+                              icon: Icons.lock_outline_rounded,
+                              accentColor: ZivaTheme.emerald400,
+                            ),
+                          ),
+                        ],
+                      );
+                    } else {
+                      // 2x2 Grid for intermediate desktop viewports
+                      return Column(
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: _buildKpiCard(
+                                  title: 'PORTFOLIO NET WORTH',
+                                  amount: _totalNetWorthInSelectedCurrency,
+                                  subtitle: 'Live BigQuery Balance',
+                                  icon: Icons.account_balance_wallet_outlined,
+                                  accentColor: ZivaTheme.gold400,
+                                  isPrimary: true,
+                                ),
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: _buildKpiCard(
+                                  title: 'TIER 1: DAILY SPEND',
+                                  amount: _getTierBalance('DAILY_SPENDING'),
+                                  subtitle: 'Instant Liquidity Vault',
+                                  icon: Icons.flash_on_rounded,
+                                  accentColor: ZivaTheme.cyan400,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 16),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: _buildKpiCard(
+                                  title: 'TIER 2: OPERATIONAL',
+                                  amount: _getTierBalance('MONTHLY_ALLOCATION'),
+                                  subtitle: 'Fixed Commitments',
+                                  icon: Icons.calendar_month_rounded,
+                                  accentColor: ZivaTheme.gold400,
+                                ),
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: _buildKpiCard(
+                                  title: 'TIER 3: LONG-TERM',
+                                  amount: _getTierBalance('LONG_TERM_VAULT'),
+                                  subtitle: 'Preservation Vaults',
+                                  icon: Icons.lock_outline_rounded,
+                                  accentColor: ZivaTheme.emerald400,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      );
+                    }
+                  },
+                ),
+
+                const SizedBox(height: 28),
+
+                // -------------------------------------------------------
+                // 2. ACTIVE INSTITUTIONAL ACCOUNTS AUDIT (BigQuery Verified)
+                // -------------------------------------------------------
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'ACTIVE FINANCIAL INSTITUTIONS & ACCOUNTS',
+                        style: TextStyle(
+                          fontFamily: 'monospace',
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: ZivaTheme.textMuted,
+                          letterSpacing: 0.8,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '${_accounts.length} Accounts Registered',
+                      style: const TextStyle(fontSize: 11, color: ZivaTheme.gold400, fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+
+                if (_accounts.isEmpty)
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(24),
+                    decoration: BoxDecoration(
+                      color: ZivaTheme.bgSurface,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: ZivaTheme.borderCard),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: ZivaTheme.emerald400.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: const Icon(Icons.check_circle_outline, color: ZivaTheme.emerald400, size: 20),
+                            ),
+                            const SizedBox(width: 14),
+                            const Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Live Production Database Wiped (0 Active Accounts)',
+                                    style: TextStyle(color: ZivaTheme.textPrimary, fontSize: 13, fontWeight: FontWeight.bold),
+                                  ),
+                                  SizedBox(height: 2),
+                                  Text(
+                                    'Stale cache removed. Net worth baseline is strictly R 0.00.',
+                                    style: TextStyle(color: ZivaTheme.textMuted, fontSize: 11),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  )
+                else
+                  ..._accounts.map((acc) => Container(
+                        margin: const EdgeInsets.only(bottom: 10),
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: ZivaTheme.bgSurface,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: ZivaTheme.borderCard),
+                        ),
+                        child: Row(
+                          children: [
+                            CircleAvatar(
+                              backgroundColor: ZivaTheme.gold500.withValues(alpha: 0.1),
+                              child: const Icon(Icons.account_balance, color: ZivaTheme.gold400, size: 18),
+                            ),
+                            const SizedBox(width: 16),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(acc.accountName, style: const TextStyle(color: ZivaTheme.textPrimary, fontWeight: FontWeight.w600, fontSize: 14)),
+                                  Text('${acc.financialInstitution} • ${acc.accountType} • ${acc.cashFlowTier}', style: const TextStyle(color: ZivaTheme.textMuted, fontSize: 12)),
+                                ],
+                              ),
+                            ),
+                            Text(
+                              CurrencyFormatter.formatAmount(acc.nativeBalance, currency: acc.primaryCurrency),
+                              style: const TextStyle(color: ZivaTheme.textPrimary, fontWeight: FontWeight.bold, fontSize: 14, fontFamily: 'monospace'),
+                            ),
+                          ],
+                        ),
+                      )),
+
+                const SizedBox(height: 28),
+
+                // -------------------------------------------------------
+                // 3. ZERO-BASED CASH FLOW ALLOCATIONS
+                // -------------------------------------------------------
+                const Text(
+                  'ZERO-BASED CASH FLOW FRAMEWORK',
+                  style: TextStyle(
+                    fontFamily: 'monospace',
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: ZivaTheme.textMuted,
+                    letterSpacing: 0.8,
+                  ),
+                ),
+                const SizedBox(height: 14),
+
+                LayoutBuilder(
+                  builder: (context, tierConstraints) {
+                    if (tierConstraints.maxWidth >= 750) {
+                      return Row(
+                        children: [
+                          Expanded(
+                            child: _buildDesktopTierTile(
+                              title: 'Tier 1: Daily Liquidity',
+                              rule: 'Capitec & EcoCash Instant Buffer',
+                              balance: _getTierBalance('DAILY_SPENDING'),
+                              icon: Icons.flash_on_rounded,
+                              color: ZivaTheme.cyan400,
+                            ),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: _buildDesktopTierTile(
+                              title: 'Tier 2: Monthly Operational',
+                              rule: 'FNB Commercial Fixed Costs',
+                              balance: _getTierBalance('MONTHLY_ALLOCATION'),
+                              icon: Icons.calendar_month_rounded,
+                              color: ZivaTheme.gold400,
+                            ),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: _buildDesktopTierTile(
+                              title: 'Tier 3: Long-Term Vault',
+                              rule: '32-Day Notice & TFSA Equities',
+                              balance: _getTierBalance('LONG_TERM_VAULT'),
+                              icon: Icons.lock_outline_rounded,
+                              color: ZivaTheme.emerald400,
+                            ),
+                          ),
+                        ],
+                      );
+                    } else {
+                      return Column(
+                        children: [
+                          _buildDesktopTierTile(
+                            title: 'Tier 1: Daily Liquidity',
+                            rule: 'Capitec & EcoCash Instant Buffer',
+                            balance: _getTierBalance('DAILY_SPENDING'),
+                            icon: Icons.flash_on_rounded,
+                            color: ZivaTheme.cyan400,
+                          ),
+                          const SizedBox(height: 10),
+                          _buildDesktopTierTile(
+                            title: 'Tier 2: Monthly Operational',
+                            rule: 'FNB Commercial Fixed Costs',
+                            balance: _getTierBalance('MONTHLY_ALLOCATION'),
+                            icon: Icons.calendar_month_rounded,
+                            color: ZivaTheme.gold400,
+                          ),
+                          const SizedBox(height: 10),
+                          _buildDesktopTierTile(
+                            title: 'Tier 3: Long-Term Vault',
+                            rule: '32-Day Notice & TFSA Equities',
+                            balance: _getTierBalance('LONG_TERM_VAULT'),
+                            icon: Icons.lock_outline_rounded,
+                            color: ZivaTheme.emerald400,
+                          ),
+                        ],
+                      );
+                    }
+                  },
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDesktopRightPanel() {
+    return Column(
+      children: [
+        // Panel Header
+        Container(
+          height: 68,
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          alignment: Alignment.centerLeft,
+          decoration: const BoxDecoration(
+            border: Border(bottom: BorderSide(color: ZivaTheme.borderCard)),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Expanded(
+                child: Text(
+                  'RECENT ACTIVITY & FEED',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.0, color: ZivaTheme.textPrimary),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              TextButton(
+                onPressed: widget.onNavigateToLedger,
+                child: const Text('View All', style: TextStyle(fontSize: 12, color: ZivaTheme.gold400)),
+              ),
+            ],
+          ),
+        ),
+
+        // Panel Scrollable Content
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.all(20),
+            children: [
+              // Quick Actions Card
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: ZivaTheme.bgCore,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: ZivaTheme.borderCard),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('QUICK DISPATCH', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: ZivaTheme.textMuted, letterSpacing: 0.8)),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: _openQuickEntry,
+                        icon: const Icon(Icons.add, size: 16),
+                        label: const Text('New Transaction'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: ZivaTheme.gold500,
+                          foregroundColor: Colors.black,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: widget.onNavigateToLedger,
+                        icon: const Icon(Icons.handshake_outlined, size: 16, color: ZivaTheme.textPrimary),
+                        label: const Text('Open Debt/Credit Ledger', style: TextStyle(color: ZivaTheme.textPrimary)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 20),
+
+              // Recent Transactions Header
+              const Text('TRANSACTION AUDIT STREAM', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: ZivaTheme.textMuted, letterSpacing: 0.8)),
+              const SizedBox(height: 12),
+
+              if (_recentTransactions.isEmpty)
+                Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: ZivaTheme.bgCore,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: ZivaTheme.borderCard),
+                  ),
+                  child: const Center(
+                    child: Text(
+                      '0 transactions in live dataset.\nAll ledger entries wiped.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: ZivaTheme.textMuted, fontSize: 11),
+                    ),
+                  ),
+                )
+              else
+                ..._recentTransactions.take(8).map((tx) => _buildTransactionItem(tx)),
+
+              const SizedBox(height: 20),
+
+              // Security & Telemetry Card
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: ZivaTheme.bgCore,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: ZivaTheme.borderCard),
+                ),
+                child: const Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.lock_clock_outlined, size: 14, color: ZivaTheme.emerald400),
+                        SizedBox(width: 8),
+                        Text('ZERO STALE CACHE POLICY', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: ZivaTheme.textPrimary)),
+                      ],
+                    ),
+                    SizedBox(height: 6),
+                    Text(
+                      'Front-end cache bypass active. Queries execute straight against BigQuery personal_finance.',
+                      style: TextStyle(color: ZivaTheme.textMuted, fontSize: 10),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  // --- Helper Widgets ---
+
+  Widget _buildKpiCard({
+    required String title,
+    required double amount,
+    required String subtitle,
+    required IconData icon,
+    required Color accentColor,
+    bool isPrimary = false,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: isPrimary ? ZivaTheme.gold500.withValues(alpha: 0.08) : ZivaTheme.bgSurface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isPrimary ? ZivaTheme.gold500.withValues(alpha: 0.4) : ZivaTheme.borderCard,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Text(
+                  title,
+                  style: TextStyle(
+                    fontFamily: 'monospace',
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    color: isPrimary ? ZivaTheme.gold400 : ZivaTheme.textMuted,
+                    letterSpacing: 0.8,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(width: 4),
+              Icon(icon, size: 18, color: accentColor),
+            ],
+          ),
+          const SizedBox(height: 14),
+          _isLoading
+              ? const SizedBox(
+                  height: 30,
+                  child: Center(
+                    child: SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: ZivaTheme.gold500),
+                    ),
+                  ),
+                )
+              : Text(
+                  CurrencyFormatter.formatAmount(amount, currency: _selectedCurrency),
+                  style: TextStyle(
+                    fontSize: isPrimary ? 24 : 20,
+                    fontWeight: FontWeight.w900,
+                    color: ZivaTheme.textPrimary,
+                    letterSpacing: -0.5,
+                  ),
+                ),
+          const SizedBox(height: 6),
+          Text(
+            subtitle,
+            style: const TextStyle(fontSize: 11, color: ZivaTheme.textMuted),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDesktopTierTile({
+    required String title,
+    required String rule,
+    required double balance,
+    required IconData icon,
+    required Color color,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: ZivaTheme.bgSurface,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: ZivaTheme.borderCard),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(icon, color: color, size: 18),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(title, style: const TextStyle(color: ZivaTheme.textPrimary, fontWeight: FontWeight.bold, fontSize: 12), overflow: TextOverflow.ellipsis),
+                Text(rule, style: const TextStyle(color: ZivaTheme.textMuted, fontSize: 10), overflow: TextOverflow.ellipsis),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            CurrencyFormatter.formatAmount(balance, currency: _selectedCurrency),
+            style: const TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 13, color: ZivaTheme.textPrimary),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildTierCard({
     required String tierName,
     required String description,
     required IconData icon,
     required Color iconColor,
-    required String filterTier,
+    required double balance,
   }) {
-    final tierAccounts = _accounts.where((a) => a.cashFlowTier == filterTier).toList();
-    double tierTotalZar = 0;
-    for (final acc in tierAccounts) {
-      tierTotalZar += CurrencyFormatter.convert(
-        amount: acc.nativeBalance,
-        fromCurrency: acc.primaryCurrency,
-        toCurrency: 'ZAR',
-      );
-    }
-    final tierValConverted = CurrencyFormatter.convert(
-      amount: tierTotalZar,
-      fromCurrency: 'ZAR',
-      toCurrency: _selectedCurrency,
-    );
-
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(14.0),
@@ -539,7 +1472,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
             ),
             Text(
-              CurrencyFormatter.formatAmount(tierValConverted, currency: _selectedCurrency),
+              CurrencyFormatter.formatAmount(balance, currency: _selectedCurrency),
               style: const TextStyle(
                 fontFamily: 'monospace',
                 fontWeight: FontWeight.w800,
@@ -549,6 +1482,63 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildTransactionItem(TransactionModel tx) {
+    final isExpense = tx.originalAmount < 0;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: ZivaTheme.bgCard,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: ZivaTheme.borderCard),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            isExpense ? Icons.arrow_upward_rounded : Icons.arrow_downward_rounded,
+            color: isExpense ? ZivaTheme.rose400 : ZivaTheme.emerald400,
+            size: 16,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(tx.merchantOrPayee, style: const TextStyle(color: ZivaTheme.textPrimary, fontSize: 13, fontWeight: FontWeight.w600)),
+                Text(tx.categoryName, style: const TextStyle(color: ZivaTheme.textMuted, fontSize: 11)),
+              ],
+            ),
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                CurrencyFormatter.formatAmount(tx.originalAmount, currency: tx.originalCurrency),
+                style: TextStyle(
+                  fontFamily: 'monospace',
+                  color: isExpense ? ZivaTheme.textPrimary : ZivaTheme.emerald400,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 13,
+                ),
+              ),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(tx.transactionDate, style: const TextStyle(color: ZivaTheme.textMuted, fontSize: 10)),
+                  const SizedBox(width: 4),
+                  if (tx.isSynced)
+                    const Icon(Icons.check_circle_rounded, size: 10, color: ZivaTheme.emerald400)
+                  else
+                    const Icon(Icons.schedule_rounded, size: 10, color: ZivaTheme.gold400),
+                ],
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }

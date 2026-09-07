@@ -22,6 +22,15 @@ class SqliteService {
 
   SqliteService._internal();
 
+  /// Invalidate and clear all in-memory and local caches so fresh queries
+  /// strictly reflect the live, wiped BigQuery dataset.
+  void invalidateAndClearCaches() {
+    _mockTransactions.clear();
+    _mockAccounts.clear();
+    _mockQueue.clear();
+    debugPrint('[SqliteService] Caches invalidated. Clean live state active.');
+  }
+
   /// Public getter indicating if mock fallback is currently serving SQLite calls
   bool get isUsingMockFallback => kIsWeb || _useMockFallback;
 
@@ -180,18 +189,18 @@ class SqliteService {
     if (kIsWeb) {
       try {
         final bqTxs = await _api.fetchTransactions(limit: limit);
+        _mockTransactions.clear();
         if (bqTxs.isNotEmpty) {
-          _mockTransactions.clear();
           _mockTransactions.addAll(bqTxs);
           debugPrint('[SqliteService] Web: Successfully retrieved ${bqTxs.length} ledger transactions directly from BigQuery.');
-          return bqTxs;
+        } else {
+          debugPrint('[SqliteService] Web: Live BigQuery transaction table has 0 rows.');
         }
+        return bqTxs;
       } catch (e) {
-        debugPrint('[SqliteService] Web: Direct BigQuery fetch failed: $e. Using in-memory fallback.');
+        debugPrint('[SqliteService] Web: Direct BigQuery fetch failed: $e. Returning empty list.');
+        return [];
       }
-      final sorted = List<TransactionModel>.from(_mockTransactions)
-        ..sort((a, b) => b.transactionDate.compareTo(a.transactionDate));
-      return sorted.take(limit).toList();
     }
 
     final db = await database;
@@ -445,16 +454,18 @@ class SqliteService {
     if (kIsWeb) {
       try {
         final bqAccounts = await _api.fetchAccounts();
+        _mockAccounts.clear();
         if (bqAccounts.isNotEmpty) {
-          _mockAccounts.clear();
           _mockAccounts.addAll(bqAccounts);
           debugPrint('[SqliteService] Web: Successfully retrieved ${bqAccounts.length} accounts directly from BigQuery.');
-          return bqAccounts.where((a) => a.isActive).toList();
+        } else {
+          debugPrint('[SqliteService] Web: Live BigQuery accounts table has 0 rows.');
         }
+        return bqAccounts.where((a) => a.isActive).toList();
       } catch (e) {
-        debugPrint('[SqliteService] Web: Direct BigQuery accounts fetch failed: $e. Using in-memory fallback.');
+        debugPrint('[SqliteService] Web: Direct BigQuery accounts fetch failed: $e. Returning empty list.');
+        return [];
       }
-      return _mockAccounts.where((a) => a.isActive).toList();
     }
 
     final db = await database;
