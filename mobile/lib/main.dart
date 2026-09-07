@@ -3,9 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'core/config/app_environment.dart';
 import 'core/theme/ziva_theme.dart';
+import 'core/utils/url_anchor_helper.dart';
 import 'features/auth/access_guard_screen.dart';
 import 'features/auth/privacy_shield.dart';
 import 'features/dashboard/dashboard_screen.dart';
+import 'features/desktop/desktop_sidebar.dart';
 import 'features/ledger/ledger_screen.dart';
 import 'features/settings/developer_settings_screen.dart';
 import 'services/biometric_service.dart';
@@ -70,11 +72,37 @@ class _MainNavigationShellState extends State<MainNavigationShell> with WidgetsB
   bool _isUnlocked = false;
   bool _isBackgroundMasked = false;
   int _currentTabIndex = 0;
+  String _selectedCurrency = 'ZAR';
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _initTabFromUrl();
+  }
+
+  void _initTabFromUrl() {
+    final anchor = getUrlAnchor().toLowerCase();
+    if (anchor.contains('ledger')) {
+      _currentTabIndex = 1;
+    } else if (anchor.contains('settings') || anchor.contains('dev')) {
+      _currentTabIndex = 2;
+    } else {
+      _currentTabIndex = 0;
+    }
+  }
+
+  void _selectTab(int index) {
+    setState(() {
+      _currentTabIndex = index;
+      if (index == 0) {
+        setUrlAnchor('command-center');
+      } else if (index == 1) {
+        setUrlAnchor('ledger');
+      } else if (index == 2) {
+        setUrlAnchor('settings');
+      }
+    });
   }
 
   @override
@@ -162,47 +190,64 @@ class _MainNavigationShellState extends State<MainNavigationShell> with WidgetsB
             builder: (context, constraints) {
               final isDesktop = constraints.maxWidth >= 800;
 
-              return Scaffold(
-                body: Column(
-                  children: [
-                    // Top Staging Advisory Banner
-                    if (AppEnvironment.isStaging)
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                        color: const Color(0xFFF59E0B),
-                        child: const Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.warning_amber_rounded, size: 14, color: Colors.black),
-                            SizedBox(width: 8),
-                            Text(
-                              'STAGING SANDBOX ENVIRONMENT • MOCK TELEMETRY ACTIVE',
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w800,
-                                letterSpacing: 1.1,
-                                color: Colors.black,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    Expanded(
-                      child: IndexedStack(
-                        index: _currentTabIndex,
+              final mainContent = Column(
+                children: [
+                  // Top Staging Advisory Banner
+                  if (AppEnvironment.isStaging)
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                      color: const Color(0xFFF59E0B),
+                      child: const Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          DashboardScreen(
-                            onNavigateToLedger: () => setState(() => _currentTabIndex = 1),
-                            onNavigateToSettings: () => setState(() => _currentTabIndex = 2),
+                          Icon(Icons.warning_amber_rounded, size: 14, color: Colors.black),
+                          SizedBox(width: 8),
+                          Text(
+                            'STAGING SANDBOX ENVIRONMENT • MOCK TELEMETRY ACTIVE',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 1.1,
+                              color: Colors.black,
+                            ),
                           ),
-                          const LedgerScreen(),
-                          const DeveloperSettingsScreen(),
                         ],
                       ),
                     ),
-                  ],
-                ),
+                  Expanded(
+                    child: IndexedStack(
+                      index: _currentTabIndex,
+                      children: [
+                        DashboardScreen(
+                          showSidebar: false,
+                          selectedCurrency: _selectedCurrency,
+                          onNavigateToLedger: () => _selectTab(1),
+                          onNavigateToSettings: () => _selectTab(2),
+                        ),
+                        const LedgerScreen(),
+                        const DeveloperSettingsScreen(),
+                      ],
+                    ),
+                  ),
+                ],
+              );
+
+              return Scaffold(
+                body: isDesktop
+                    ? Row(
+                        children: [
+                          DesktopSidebar(
+                            currentTabIndex: _currentTabIndex,
+                            selectedCurrency: _selectedCurrency,
+                            onCurrencyChanged: (curr) => setState(() => _selectedCurrency = curr),
+                            onSecretAdminTrigger: () => _selectTab(2),
+                            onTabSelected: _selectTab,
+                          ),
+                          Expanded(child: mainContent),
+                        ],
+                      )
+                    : mainContent,
                 bottomNavigationBar: isDesktop
                     ? null
                     : Container(
@@ -214,7 +259,7 @@ class _MainNavigationShellState extends State<MainNavigationShell> with WidgetsB
                           selectedIndex: _currentTabIndex,
                           backgroundColor: ZivaTheme.bgSurface,
                           indicatorColor: ZivaTheme.gold500.withValues(alpha: 0.2),
-                          onDestinationSelected: (idx) => setState(() => _currentTabIndex = idx),
+                          onDestinationSelected: _selectTab,
                           destinations: [
                             const NavigationDestination(
                               icon: Icon(Icons.dashboard_outlined, color: ZivaTheme.textMuted),

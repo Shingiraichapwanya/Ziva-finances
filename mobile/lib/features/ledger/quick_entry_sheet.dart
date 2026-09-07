@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -28,7 +29,7 @@ class _QuickEntryBottomSheetState extends State<QuickEntryBottomSheet> {
   String _selectedCurrency = 'ZAR';
   String _selectedAccountId = 'ACC_ZA_CAPITEC_DAILY';
   String _selectedCategoryId = 'CAT_GROCERIES';
-  String _selectedCategoryName = 'Groceries & Household Supplies';
+  String _selectedCategoryName = 'Groceries & Household';
   final String _transactionType = 'EXPENSE';
   bool _isTaxDeductible = false;
   bool _isSubmitting = false;
@@ -47,19 +48,21 @@ class _QuickEntryBottomSheetState extends State<QuickEntryBottomSheet> {
     {'id': 'ACC_ZA_DISCOVERY_VAULT', 'name': 'Discovery 32-Day Notice (ZAR)'},
   ];
 
-  final List<Map<String, String>> _categories = [
-    {'id': 'CAT_GROCERIES', 'name': 'Groceries & Household Supplies', 'tax': '0'},
-    {'id': 'CAT_TECH_HARDWARE', 'name': 'Productivity Tech & Work Hardware', 'tax': '1'},
-    {'id': 'CAT_SOFTWARE_SAAS', 'name': 'Business Software & Cloud Subscriptions', 'tax': '1'},
-    {'id': 'CAT_RENT', 'name': 'Residential Rent & Levies', 'tax': '0'},
-    {'id': 'CAT_FIBRE_INTERNET', 'name': 'High-Speed Home Fibre', 'tax': '1'},
-    {'id': 'CAT_DINING_COFFEE', 'name': 'Restaurants, Takeaways & Coffee', 'tax': '0'},
-    {'id': 'CAT_TAX_STATUTORY', 'name': 'Provisional & Statutory Tax Payments', 'tax': '1'},
+  List<Map<String, String>> _categories = [
+    {'id': 'CAT_HOUSING_RENT', 'name': 'Residential Rent & Levies', 'tax': '0'},
+    {'id': 'CAT_GROCERIES', 'name': 'Groceries & Household', 'tax': '0'},
+    {'id': 'CAT_UTILITIES', 'name': 'Electricity & Municipal Utilities', 'tax': '1'},
+    {'id': 'CAT_CONNECTIVITY', 'name': 'Fibre Internet & Mobile Data', 'tax': '1'},
+    {'id': 'CAT_DINING_LEISURE', 'name': 'Dining, Coffee & Social', 'tax': '0'},
+    {'id': 'CAT_TECH_CLOUD', 'name': 'Cloud SaaS & Productivity Tools', 'tax': '1'},
+    {'id': 'CAT_SINKING_EMERGENCY', 'name': 'Emergency Reserve Sinking Fund', 'tax': '0'},
+    {'id': 'CAT_SINKING_MAINTENANCE', 'name': 'Vehicle Maintenance Sinking Fund', 'tax': '0'},
   ];
 
   @override
   void initState() {
     super.initState();
+    _loadEnvelopesAsCategories();
     if (kIsWeb) {
       registerDragDropListener(
         onFileDropped: _processReceiptFile,
@@ -67,6 +70,23 @@ class _QuickEntryBottomSheetState extends State<QuickEntryBottomSheet> {
           if (mounted) setState(() => _isDragOver = isDragging);
         },
       );
+    }
+  }
+
+  Future<void> _loadEnvelopesAsCategories() async {
+    final envs = await SqliteService.instance.getEnvelopes();
+    if (mounted && envs.isNotEmpty) {
+      setState(() {
+        _categories = envs.map((e) => {
+          'id': e.categoryId,
+          'name': '${e.categoryName} (${e.categoryGroup})',
+          'tax': e.isFixedObligation ? '1' : '0',
+        }).toList();
+        if (!_categories.any((c) => c['id'] == _selectedCategoryId)) {
+          _selectedCategoryId = _categories.first['id']!;
+          _selectedCategoryName = _categories.first['name']!;
+        }
+      });
     }
   }
 
@@ -268,44 +288,43 @@ class _QuickEntryBottomSheetState extends State<QuickEntryBottomSheet> {
       receiptUrl: rUrl,
     );
 
-    // 1. Write to local SQLite / Web BigQuery service
-    await SqliteService.instance.saveTransaction(newTx);
+    // 1. OPTIMISTIC UI: Notify dashboard immediately and dismiss modal with 0ms lag
+    widget.onTransactionLogged(newTx);
+    Navigator.of(context).pop();
 
-    // 2. Enqueue in sync queue with JSON payload
-    await SqliteService.instance.enqueueMutation(
-      transactionId: txId,
-      payloadJson: jsonEncode(newTx.toJson()),
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        backgroundColor: ZivaTheme.bgSurface,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+          side: const BorderSide(color: ZivaTheme.gold400),
+        ),
+        content: const Row(
+          children: [
+            Icon(Icons.bolt_rounded, color: ZivaTheme.gold400, size: 20),
+            SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Transaction logged instantly • BigQuery background sync active',
+                style: TextStyle(color: ZivaTheme.textPrimary, fontSize: 13),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
 
-    // 3. Trigger immediate background reconciliation if network is available
-    SyncEngine.instance.processQueue();
-
-    if (mounted) {
-      widget.onTransactionLogged(newTx);
-      Navigator.of(context).pop();
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          backgroundColor: ZivaTheme.bgSurface,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
-            side: const BorderSide(color: ZivaTheme.borderCard),
-          ),
-          content: const Row(
-            children: [
-              Icon(Icons.cloud_queue_rounded, color: ZivaTheme.gold400, size: 20),
-              SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  'Transaction logged. Syncing to BigQuery warehouse.',
-                  style: TextStyle(color: ZivaTheme.textPrimary, fontSize: 13),
-                ),
-              ),
-            ],
-          ),
-        ),
+    // 2. Background Persistence & Mutation Queue
+    try {
+      await SqliteService.instance.saveTransaction(newTx);
+      await SqliteService.instance.enqueueMutation(
+        transactionId: txId,
+        payloadJson: jsonEncode(newTx.toJson()),
       );
+      unawaited(SyncEngine.instance.processQueue());
+    } catch (e) {
+      debugPrint('[QuickEntry] Background persistence error: $e');
     }
   }
 

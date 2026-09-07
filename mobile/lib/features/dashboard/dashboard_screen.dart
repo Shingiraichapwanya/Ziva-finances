@@ -4,20 +4,27 @@ import '../../core/layout/responsive_layout.dart';
 import '../../core/theme/ziva_theme.dart';
 import '../../core/utils/currency_formatter.dart';
 import '../../models/account_model.dart';
+import '../../models/envelope_model.dart';
 import '../../models/transaction_model.dart';
 import '../../services/sqlite_service.dart';
 import '../../services/sync_engine.dart';
+import '../desktop/desktop_sidebar.dart';
 import '../ledger/quick_entry_sheet.dart';
 import '../settings/developer_settings_screen.dart';
+import 'widgets/envelope_overview_section.dart';
 
 class DashboardScreen extends StatefulWidget {
   final VoidCallback onNavigateToLedger;
   final VoidCallback? onNavigateToSettings;
+  final bool showSidebar;
+  final String selectedCurrency;
 
   const DashboardScreen({
     super.key,
     required this.onNavigateToLedger,
     this.onNavigateToSettings,
+    this.showSidebar = true,
+    this.selectedCurrency = 'ZAR',
   });
 
   @override
@@ -28,15 +35,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
   String _selectedCurrency = 'ZAR';
   List<AccountModel> _accounts = [];
   List<TransactionModel> _recentTransactions = [];
+  List<EnvelopeModel> _envelopes = [];
   bool _isLoading = true;
   int _secretTapCount = 0;
 
   @override
   void initState() {
     super.initState();
+    _selectedCurrency = widget.selectedCurrency;
     // Cache Invalidation: Immediately wipe any stale front-end caches
     SqliteService.instance.invalidateAndClearCaches();
     _loadDashboardData();
+  }
+
+  @override
+  void didUpdateWidget(DashboardScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.selectedCurrency != widget.selectedCurrency) {
+      setState(() {
+        _selectedCurrency = widget.selectedCurrency;
+      });
+    }
   }
 
   Future<void> _loadDashboardData() async {
@@ -50,11 +69,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
         const Duration(seconds: 4),
         onTimeout: () => [],
       );
+      final envs = await SqliteService.instance.getEnvelopes().timeout(
+        const Duration(seconds: 4),
+        onTimeout: () => [],
+      );
 
       if (mounted) {
         setState(() {
           _accounts = accounts;
           _recentTransactions = txs;
+          _envelopes = envs;
           _isLoading = false;
         });
       }
@@ -64,6 +88,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         setState(() {
           _accounts = [];
           _recentTransactions = [];
+          _envelopes = [];
           _isLoading = false;
         });
       }
@@ -133,10 +158,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
       backgroundColor: Colors.transparent,
       builder: (ctx) => QuickEntryBottomSheet(
         onTransactionLogged: (newTx) {
+          // Optimistic UI update: Immediate local update for snappy feel
           setState(() {
             _recentTransactions.insert(0, newTx);
+            if (newTx.categoryId.isNotEmpty) {
+              final idx = _envelopes.indexWhere((e) => e.categoryId == newTx.categoryId);
+              if (idx != -1) {
+                final env = _envelopes[idx];
+                final spendDelta = newTx.reportingAmountZar.abs();
+                _envelopes[idx] = env.copyWith(
+                  actualSpentZar: env.actualSpentZar + spendDelta,
+                );
+              }
+            }
           });
-          _loadDashboardData();
         },
       ),
     );
@@ -430,6 +465,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
               const SizedBox(height: 24),
 
+              // Restored Zero-Based Envelope Budget System Overview
+              EnvelopeOverviewSection(
+                envelopes: _envelopes,
+                selectedCurrency: _selectedCurrency,
+                onEnvelopesUpdated: _loadDashboardData,
+              ),
+
+              const SizedBox(height: 24),
+
               // Recent Transactions Header
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -502,7 +546,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
           // ----------------------------------------------------
           // COLUMN 1: WIDESCREEN LEFT SIDEBAR (Width: 260px)
           // ----------------------------------------------------
-          _buildDesktopLeftSidebar(),
+          if (widget.showSidebar)
+            DesktopSidebar(
+              currentTabIndex: 0,
+              selectedCurrency: _selectedCurrency,
+              onCurrencyChanged: (curr) => setState(() => _selectedCurrency = curr),
+              onSecretAdminTrigger: _onBrandHeaderTapped,
+              onTabSelected: (idx) {
+                if (idx == 1) widget.onNavigateToLedger();
+                if (idx == 2 && widget.onNavigateToSettings != null) {
+                  widget.onNavigateToSettings!();
+                }
+              },
+            ),
 
           // ----------------------------------------------------
           // COLUMN 2: PRIMARY CENTER COMMAND CENTER (Flexible/Expand)
@@ -524,281 +580,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
             child: _buildDesktopRightPanel(),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildDesktopLeftSidebar() {
-    return Container(
-      width: 260,
-      decoration: const BoxDecoration(
-        color: ZivaTheme.bgSurface,
-        border: Border(right: BorderSide(color: ZivaTheme.borderCard)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Brand Header
-          Padding(
-            padding: const EdgeInsets.all(24.0),
-            child: Row(
-              children: [
-                Container(
-                  width: 36,
-                  height: 36,
-                  decoration: BoxDecoration(
-                    color: ZivaTheme.gold500.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: ZivaTheme.gold500.withValues(alpha: 0.3)),
-                  ),
-                  child: const Center(
-                    child: Icon(Icons.diamond_outlined, color: ZivaTheme.gold400, size: 20),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                const Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        'ZIVA FINANCE',
-                        style: TextStyle(
-                          color: ZivaTheme.textPrimary,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: 1.2,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      Text(
-                        'COMMAND CENTER',
-                        style: TextStyle(
-                          color: ZivaTheme.gold400,
-                          fontSize: 9,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 1.0,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          // Environment Badge
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 2),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                color: AppEnvironment.badgeBgColor,
-                borderRadius: BorderRadius.circular(6),
-                border: Border.all(color: AppEnvironment.badgeBorderColor),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.shield_outlined, size: 14, color: AppEnvironment.accentColor),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      AppEnvironment.badgeLabel,
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 0.8,
-                        color: AppEnvironment.accentColor,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-
-          const SizedBox(height: 16),
-
-          // Currency Switcher Row
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'REPORTING CURRENCY',
-                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.8, color: ZivaTheme.textMuted),
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: ['ZAR', 'USD', 'ZiG'].map((curr) {
-                    final isSelected = _selectedCurrency == curr;
-                    return Expanded(
-                      child: GestureDetector(
-                        onTap: () => setState(() => _selectedCurrency = curr),
-                        child: Container(
-                          margin: const EdgeInsets.only(right: 4),
-                          padding: const EdgeInsets.symmetric(vertical: 6),
-                          decoration: BoxDecoration(
-                            color: isSelected ? ZivaTheme.gold500 : ZivaTheme.bgCore,
-                            borderRadius: BorderRadius.circular(6),
-                            border: Border.all(
-                              color: isSelected ? ZivaTheme.gold500 : ZivaTheme.borderCard,
-                            ),
-                          ),
-                          alignment: Alignment.center,
-                          child: Text(
-                            curr,
-                            style: TextStyle(
-                              color: isSelected ? Colors.black : ZivaTheme.textMuted,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ),
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ],
-            ),
-          ),
-
-          const SizedBox(height: 20),
-          const Divider(color: ZivaTheme.borderCard, height: 1),
-          const SizedBox(height: 16),
-
-          // Desktop Sidebar Navigation
-          _buildSidebarNavButton(
-            icon: Icons.dashboard_rounded,
-            label: 'Executive Overview',
-            isActive: true,
-            onTap: () {},
-          ),
-          _buildSidebarNavButton(
-            icon: Icons.receipt_long_rounded,
-            label: 'Debt & Credit Ledger',
-            isActive: false,
-            onTap: widget.onNavigateToLedger,
-          ),
-          _buildSidebarNavButton(
-            icon: Icons.tune_rounded,
-            label: 'System Settings & OTA',
-            isActive: false,
-            onTap: () {
-              if (widget.onNavigateToSettings != null) {
-                widget.onNavigateToSettings!();
-              } else {
-                Navigator.of(context).push(
-                  MaterialPageRoute<void>(builder: (_) => const DeveloperSettingsScreen()),
-                );
-              }
-            },
-          ),
-
-          const Spacer(),
-
-          // BigQuery Warehouse Status Telemetry Widget
-          Container(
-            margin: const EdgeInsets.all(16),
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: ZivaTheme.bgCore,
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: ZivaTheme.borderCard),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      width: 8,
-                      height: 8,
-                      decoration: const BoxDecoration(
-                        color: Color(0xFF10B981),
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    const Expanded(
-                      child: Text(
-                        'Google Cloud BigQuery',
-                        style: TextStyle(color: ZivaTheme.textPrimary, fontSize: 11, fontWeight: FontWeight.bold),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                const Text(
-                  'budget-tracker-507418',
-                  style: TextStyle(color: ZivaTheme.textMuted, fontSize: 10, fontFamily: 'monospace'),
-                ),
-                const Text(
-                  'dataset: personal_finance (wiped)',
-                  style: TextStyle(color: ZivaTheme.textMuted, fontSize: 10),
-                ),
-                const SizedBox(height: 8),
-                const Row(
-                  children: [
-                    Icon(Icons.check_circle_outline, size: 12, color: ZivaTheme.emerald400),
-                    SizedBox(width: 4),
-                    Expanded(
-                      child: Text(
-                        'Zero Stale Cache Active',
-                        style: TextStyle(color: ZivaTheme.emerald400, fontSize: 10, fontWeight: FontWeight.w600),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSidebarNavButton({
-    required IconData icon,
-    required String label,
-    required bool isActive,
-    required VoidCallback onTap,
-  }) {
-    return InkWell(
-      onTap: onTap,
-      child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        decoration: BoxDecoration(
-          color: isActive ? ZivaTheme.gold500.withValues(alpha: 0.15) : Colors.transparent,
-          borderRadius: BorderRadius.circular(8),
-          border: isActive ? Border.all(color: ZivaTheme.gold500.withValues(alpha: 0.3)) : null,
-        ),
-        child: Row(
-          children: [
-            Icon(
-              icon,
-              size: 18,
-              color: isActive ? ZivaTheme.gold400 : ZivaTheme.textMuted,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                label,
-                style: TextStyle(
-                  color: isActive ? ZivaTheme.textPrimary : ZivaTheme.textMuted,
-                  fontSize: 13,
-                  fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
-                ),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -993,7 +774,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 const SizedBox(height: 28),
 
                 // -------------------------------------------------------
-                // 2. ACTIVE INSTITUTIONAL ACCOUNTS AUDIT (BigQuery Verified)
+                // 2. RESTORED ZERO-BASED ENVELOPE BUDGET SYSTEM & ALLOCATION
+                // -------------------------------------------------------
+                EnvelopeOverviewSection(
+                  envelopes: _envelopes,
+                  selectedCurrency: _selectedCurrency,
+                  onEnvelopesUpdated: _loadDashboardData,
+                ),
+
+                const SizedBox(height: 28),
+
+                // -------------------------------------------------------
+                // 3. ACTIVE INSTITUTIONAL ACCOUNTS AUDIT (BigQuery Verified)
                 // -------------------------------------------------------
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,

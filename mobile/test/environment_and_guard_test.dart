@@ -30,8 +30,8 @@ void main() {
   });
 
   group('AccessGuardScreen Widget Tests', () {
-    testWidgets('renders executive PIN pad and handles correct passcode', (WidgetTester tester) async {
-      tester.view.physicalSize = const Size(800, 1200);
+    testWidgets('Mobile (< 800px): renders executive PIN pad and handles correct passcode', (WidgetTester tester) async {
+      tester.view.physicalSize = const Size(400, 800);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
@@ -52,7 +52,7 @@ void main() {
       expect(find.text('ZIVA FINANCE'), findsOneWidget);
       expect(find.text('Executive Financial Terminal Access'), findsOneWidget);
 
-      // Enter default master PIN: 2, 0, 2, 6
+      // Enter default master PIN on mobile touch keypad: 2, 0, 2, 6
       await tester.tap(find.text('2'));
       await tester.pump();
       await tester.tap(find.text('0'));
@@ -65,7 +65,12 @@ void main() {
       expect(authenticated, isTrue);
     });
 
-    testWidgets('rejects invalid passcode and presents error message', (WidgetTester tester) async {
+    testWidgets('Mobile (< 800px): rejects invalid passcode and presents error message', (WidgetTester tester) async {
+      tester.view.physicalSize = const Size(400, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
       bool authenticated = false;
 
       await tester.pumpWidget(
@@ -90,6 +95,37 @@ void main() {
 
       expect(authenticated, isFalse);
       expect(find.text('Invalid Passcode. Access Denied.'), findsOneWidget);
+    });
+
+    testWidgets('Desktop (>= 800px): renders masked TextFormField with Enter submission', (WidgetTester tester) async {
+      tester.view.physicalSize = const Size(1024, 768);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      bool authenticated = false;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: AccessGuardScreen(
+            onAuthenticated: () {
+              authenticated = true;
+            },
+          ),
+        ),
+      );
+
+      expect(find.text('Executive Financial Terminal • Desktop Access'), findsOneWidget);
+      expect(find.text('Unlock Terminal'), findsOneWidget);
+      expect(find.byType(TextFormField), findsOneWidget);
+
+      // Enter correct passcode '2026' and submit
+      await tester.enterText(find.byType(TextFormField), '2026');
+      await tester.pump();
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pump();
+
+      expect(authenticated, isTrue);
     });
   });
 }

@@ -5,6 +5,7 @@ import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
 import '../models/transaction_model.dart';
 import '../models/account_model.dart';
+import '../models/envelope_model.dart';
 import '../models/sync_queue_item.dart';
 import 'api_service.dart';
 
@@ -19,8 +20,108 @@ class SqliteService {
   final List<TransactionModel> _mockTransactions = [];
   final List<AccountModel> _mockAccounts = [];
   final List<SyncQueueItem> _mockQueue = [];
+  final List<EnvelopeModel> _mockEnvelopes = [];
 
-  SqliteService._internal();
+  static final List<EnvelopeModel> defaultEnvelopes = [
+    const EnvelopeModel(
+      categoryId: 'CAT_HOUSING_RENT',
+      categoryName: 'Residential Rent & Levies',
+      categoryGroup: 'ESSENTIALS',
+      cashFlowTier: 'MONTHLY_ALLOCATION',
+      targetCurrency: 'ZAR',
+      plannedAmountZar: 18500.0,
+      actualSpentZar: 0.0,
+      isFixedObligation: true,
+      notes: 'Primary residence monthly lease and building levies',
+    ),
+    const EnvelopeModel(
+      categoryId: 'CAT_GROCERIES',
+      categoryName: 'Groceries & Household',
+      categoryGroup: 'ESSENTIALS',
+      cashFlowTier: 'DAILY_SPENDING',
+      targetCurrency: 'ZAR',
+      plannedAmountZar: 6500.0,
+      actualSpentZar: 0.0,
+      isFixedObligation: false,
+      notes: 'Food markets, Woolworths, and household essentials',
+    ),
+    const EnvelopeModel(
+      categoryId: 'CAT_UTILITIES',
+      categoryName: 'Electricity & Municipal Utilities',
+      categoryGroup: 'ESSENTIALS',
+      cashFlowTier: 'MONTHLY_ALLOCATION',
+      targetCurrency: 'ZAR',
+      plannedAmountZar: 2200.0,
+      actualSpentZar: 0.0,
+      isFixedObligation: true,
+      notes: 'Eskom prepaid electricity and municipal water',
+    ),
+    const EnvelopeModel(
+      categoryId: 'CAT_CONNECTIVITY',
+      categoryName: 'Fibre Internet & Mobile Data',
+      categoryGroup: 'ESSENTIALS',
+      cashFlowTier: 'MONTHLY_ALLOCATION',
+      targetCurrency: 'ZAR',
+      plannedAmountZar: 1450.0,
+      actualSpentZar: 0.0,
+      isFixedObligation: true,
+      notes: 'High-speed home fibre and roaming mobile eSIM data',
+    ),
+    const EnvelopeModel(
+      categoryId: 'CAT_DINING_LEISURE',
+      categoryName: 'Dining, Coffee & Social',
+      categoryGroup: 'DISCRETIONARY',
+      cashFlowTier: 'DAILY_SPENDING',
+      targetCurrency: 'ZAR',
+      plannedAmountZar: 3500.0,
+      actualSpentZar: 0.0,
+      isFixedObligation: false,
+      notes: 'Client dinners, coffee meetings, and personal leisure',
+    ),
+    const EnvelopeModel(
+      categoryId: 'CAT_TECH_CLOUD',
+      categoryName: 'Cloud SaaS & Productivity Tools',
+      categoryGroup: 'DISCRETIONARY',
+      cashFlowTier: 'DAILY_SPENDING',
+      targetCurrency: 'ZAR',
+      plannedAmountZar: 2800.0,
+      actualSpentZar: 0.0,
+      isFixedObligation: false,
+      notes: 'GitHub, Google Cloud, AI tools, and productivity suites',
+    ),
+    const EnvelopeModel(
+      categoryId: 'CAT_SINKING_EMERGENCY',
+      categoryName: 'Emergency Reserve Sinking Fund',
+      categoryGroup: 'SINKING_FUNDS',
+      cashFlowTier: 'LONG_TERM_VAULT',
+      targetCurrency: 'ZAR',
+      plannedAmountZar: 5000.0,
+      actualSpentZar: 0.0,
+      isFixedObligation: false,
+      notes: 'Monthly allocation towards 6-month liquid emergency runway',
+    ),
+    const EnvelopeModel(
+      categoryId: 'CAT_SINKING_MAINTENANCE',
+      categoryName: 'Vehicle Maintenance & Insurance Sinking Fund',
+      categoryGroup: 'SINKING_FUNDS',
+      cashFlowTier: 'MONTHLY_ALLOCATION',
+      targetCurrency: 'ZAR',
+      plannedAmountZar: 2500.0,
+      actualSpentZar: 0.0,
+      isFixedObligation: false,
+      notes: 'Tyres, annual vehicle servicing, and comprehensive cover',
+    ),
+  ];
+
+  SqliteService._internal() {
+    _ensureDefaultEnvelopes();
+  }
+
+  void _ensureDefaultEnvelopes() {
+    if (_mockEnvelopes.isEmpty) {
+      _mockEnvelopes.addAll(defaultEnvelopes);
+    }
+  }
 
   /// Invalidate and clear all in-memory and local caches so fresh queries
   /// strictly reflect the live, wiped BigQuery dataset.
@@ -28,6 +129,8 @@ class SqliteService {
     _mockTransactions.clear();
     _mockAccounts.clear();
     _mockQueue.clear();
+    _mockEnvelopes.clear();
+    _ensureDefaultEnvelopes();
     debugPrint('[SqliteService] Caches invalidated. Clean live state active.');
   }
 
@@ -128,6 +231,9 @@ class SqliteService {
   // --- Transactions ---
 
   Future<void> saveTransaction(TransactionModel tx) async {
+    // Automatically apply to local envelope balances
+    applyTransactionToEnvelopes(tx);
+
     if (kIsWeb) {
       // In web mode, route directly to BigQuery service and update in-memory cache
       _mockTransactions.removeWhere((t) => t.transactionId == tx.transactionId);
@@ -255,8 +361,15 @@ class SqliteService {
 
   /// Deletes a transaction from BigQuery and local stores
   Future<bool> deleteTransaction(String transactionId) async {
-    // 1. Immediately prune from in-memory cache
-    _mockTransactions.removeWhere((t) => t.transactionId == transactionId);
+    // 1. Immediately prune from in-memory cache and revert envelope balances
+    final idx = _mockTransactions.indexWhere((t) => t.transactionId == transactionId);
+    if (idx != -1) {
+      final tx = _mockTransactions[idx];
+      applyTransactionToEnvelopes(tx, isRevert: true);
+      _mockTransactions.removeAt(idx);
+    } else {
+      _mockTransactions.removeWhere((t) => t.transactionId == transactionId);
+    }
 
     if (kIsWeb) {
       try {
@@ -474,5 +587,101 @@ class SqliteService {
     }
     final result = await db.query('local_accounts', where: 'is_active = 1');
     return result.map((m) => AccountModel.fromJson(m)).toList();
+  }
+
+  // --- Envelope Budget Management ---
+
+  /// Retrieve all active budget envelopes
+  Future<List<EnvelopeModel>> getEnvelopes() async {
+    _ensureDefaultEnvelopes();
+    return List<EnvelopeModel>.from(_mockEnvelopes.where((e) => e.isActive));
+  }
+
+  /// Create or update an envelope
+  Future<void> saveEnvelope(EnvelopeModel envelope) async {
+    _ensureDefaultEnvelopes();
+    final idx = _mockEnvelopes.indexWhere((e) => e.categoryId == envelope.categoryId);
+    if (idx != -1) {
+      _mockEnvelopes[idx] = envelope;
+    } else {
+      _mockEnvelopes.add(envelope);
+    }
+  }
+
+  /// Archive/deactivate an envelope
+  Future<void> archiveEnvelope(String categoryId) async {
+    _ensureDefaultEnvelopes();
+    final idx = _mockEnvelopes.indexWhere((e) => e.categoryId == categoryId);
+    if (idx != -1) {
+      _mockEnvelopes[idx] = _mockEnvelopes[idx].copyWith(isActive: false);
+    }
+  }
+
+  /// Move/transfer funds between two envelopes
+  Future<void> transferFunds({
+    required String fromCategoryId,
+    required String toCategoryId,
+    required double amount,
+  }) async {
+    _ensureDefaultEnvelopes();
+    if (amount <= 0) return;
+
+    final fromIdx = _mockEnvelopes.indexWhere((e) => e.categoryId == fromCategoryId);
+    final toIdx = _mockEnvelopes.indexWhere((e) => e.categoryId == toCategoryId);
+
+    if (fromIdx != -1 && toIdx != -1) {
+      final fromEnv = _mockEnvelopes[fromIdx];
+      final toEnv = _mockEnvelopes[toIdx];
+
+      _mockEnvelopes[fromIdx] = fromEnv.copyWith(
+        plannedAmountZar: (fromEnv.plannedAmountZar - amount).clamp(0.0, double.infinity),
+      );
+      _mockEnvelopes[toIdx] = toEnv.copyWith(
+        plannedAmountZar: toEnv.plannedAmountZar + amount,
+      );
+    }
+  }
+
+  /// Top up an envelope's planned allocation
+  Future<void> topUpEnvelope(String categoryId, double amount) async {
+    _ensureDefaultEnvelopes();
+    if (amount <= 0) return;
+    final idx = _mockEnvelopes.indexWhere((e) => e.categoryId == categoryId);
+    if (idx != -1) {
+      final env = _mockEnvelopes[idx];
+      _mockEnvelopes[idx] = env.copyWith(
+        plannedAmountZar: env.plannedAmountZar + amount,
+      );
+    }
+  }
+
+  /// Reduce an envelope's planned allocation
+  Future<void> reduceEnvelope(String categoryId, double amount) async {
+    _ensureDefaultEnvelopes();
+    if (amount <= 0) return;
+    final idx = _mockEnvelopes.indexWhere((e) => e.categoryId == categoryId);
+    if (idx != -1) {
+      final env = _mockEnvelopes[idx];
+      _mockEnvelopes[idx] = env.copyWith(
+        plannedAmountZar: (env.plannedAmountZar - amount).clamp(0.0, double.infinity),
+      );
+    }
+  }
+
+  /// Immediate optimistic reflection of transaction in envelope spent amounts
+  void applyTransactionToEnvelopes(TransactionModel tx, {bool isRevert = false}) {
+    _ensureDefaultEnvelopes();
+    if (tx.categoryId.isEmpty) return;
+
+    final idx = _mockEnvelopes.indexWhere((e) => e.categoryId == tx.categoryId);
+    if (idx != -1) {
+      final env = _mockEnvelopes[idx];
+      final spendDelta = tx.reportingAmountZar.abs();
+      final newSpent = isRevert
+          ? (env.actualSpentZar - spendDelta).clamp(0.0, double.infinity)
+          : env.actualSpentZar + spendDelta;
+
+      _mockEnvelopes[idx] = env.copyWith(actualSpentZar: newSpent);
+    }
   }
 }
