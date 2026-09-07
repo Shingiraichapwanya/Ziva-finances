@@ -4,8 +4,10 @@ import 'package:flutter/services.dart';
 import 'core/config/app_environment.dart';
 import 'core/theme/ziva_theme.dart';
 import 'core/utils/url_anchor_helper.dart';
+import 'features/assets/asset_registry_screen.dart';
 import 'features/auth/access_guard_screen.dart';
 import 'features/auth/privacy_shield.dart';
+import 'features/common/quick_add_fab.dart';
 import 'features/dashboard/dashboard_screen.dart';
 import 'features/desktop/desktop_sidebar.dart';
 import 'features/ledger/ledger_screen.dart';
@@ -83,10 +85,12 @@ class _MainNavigationShellState extends State<MainNavigationShell> with WidgetsB
 
   void _initTabFromUrl() {
     final anchor = getUrlAnchor().toLowerCase();
-    if (anchor.contains('ledger')) {
+    if (anchor.contains('asset')) {
       _currentTabIndex = 1;
-    } else if (anchor.contains('settings') || anchor.contains('dev')) {
+    } else if (anchor.contains('ledger')) {
       _currentTabIndex = 2;
+    } else if (anchor.contains('settings') || anchor.contains('dev')) {
+      _currentTabIndex = 3;
     } else {
       _currentTabIndex = 0;
     }
@@ -98,8 +102,10 @@ class _MainNavigationShellState extends State<MainNavigationShell> with WidgetsB
       if (index == 0) {
         setUrlAnchor('command-center');
       } else if (index == 1) {
-        setUrlAnchor('ledger');
+        setUrlAnchor('assets');
       } else if (index == 2) {
+        setUrlAnchor('ledger');
+      } else if (index == 3) {
         setUrlAnchor('settings');
       }
     });
@@ -222,8 +228,12 @@ class _MainNavigationShellState extends State<MainNavigationShell> with WidgetsB
                         DashboardScreen(
                           showSidebar: false,
                           selectedCurrency: _selectedCurrency,
-                          onNavigateToLedger: () => _selectTab(1),
-                          onNavigateToSettings: () => _selectTab(2),
+                          onNavigateToAssets: () => _selectTab(1),
+                          onNavigateToLedger: () => _selectTab(2),
+                          onNavigateToSettings: () => _selectTab(3),
+                        ),
+                        AssetRegistryScreen(
+                          onBackToDashboard: () => _selectTab(0),
                         ),
                         const LedgerScreen(),
                         const DeveloperSettingsScreen(),
@@ -241,13 +251,17 @@ class _MainNavigationShellState extends State<MainNavigationShell> with WidgetsB
                             currentTabIndex: _currentTabIndex,
                             selectedCurrency: _selectedCurrency,
                             onCurrencyChanged: (curr) => setState(() => _selectedCurrency = curr),
-                            onSecretAdminTrigger: () => _selectTab(2),
+                            onSecretAdminTrigger: () => _selectTab(3),
                             onTabSelected: _selectTab,
                           ),
                           Expanded(child: mainContent),
                         ],
                       )
                     : mainContent,
+                floatingActionButton: QuickAddFab(
+                  onNavigateToTab: _selectTab,
+                  onDataMutated: () => setState(() {}),
+                ),
                 bottomNavigationBar: isDesktop
                     ? null
                     : Container(
@@ -264,7 +278,12 @@ class _MainNavigationShellState extends State<MainNavigationShell> with WidgetsB
                             const NavigationDestination(
                               icon: Icon(Icons.dashboard_outlined, color: ZivaTheme.textMuted),
                               selectedIcon: Icon(Icons.dashboard_rounded, color: ZivaTheme.gold400),
-                              label: 'Dashboard',
+                              label: 'Command',
+                            ),
+                            const NavigationDestination(
+                              icon: Icon(Icons.account_balance_outlined, color: ZivaTheme.textMuted),
+                              selectedIcon: Icon(Icons.account_balance_rounded, color: ZivaTheme.gold400),
+                              label: 'Assets',
                             ),
                             NavigationDestination(
                               icon: ValueListenableBuilder<int>(
@@ -285,7 +304,7 @@ class _MainNavigationShellState extends State<MainNavigationShell> with WidgetsB
                             const NavigationDestination(
                               icon: Icon(Icons.tune_outlined, color: ZivaTheme.textMuted),
                               selectedIcon: Icon(Icons.tune_rounded, color: ZivaTheme.gold400),
-                              label: 'Dev & OTA',
+                              label: 'Settings',
                             ),
                           ],
                         ),

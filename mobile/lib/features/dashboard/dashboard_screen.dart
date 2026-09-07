@@ -10,11 +10,16 @@ import '../../services/sqlite_service.dart';
 import '../../services/sync_engine.dart';
 import '../desktop/desktop_sidebar.dart';
 import '../ledger/quick_entry_sheet.dart';
+import '../search/global_search_dialog.dart';
 import '../settings/developer_settings_screen.dart';
+import 'widgets/analytics_hub_section.dart';
+import 'widgets/asset_summary_widget.dart';
+import 'widgets/debt_credit_summary_widget.dart';
 import 'widgets/envelope_overview_section.dart';
 
 class DashboardScreen extends StatefulWidget {
   final VoidCallback onNavigateToLedger;
+  final VoidCallback? onNavigateToAssets;
   final VoidCallback? onNavigateToSettings;
   final bool showSidebar;
   final String selectedCurrency;
@@ -22,6 +27,7 @@ class DashboardScreen extends StatefulWidget {
   const DashboardScreen({
     super.key,
     required this.onNavigateToLedger,
+    this.onNavigateToAssets,
     this.onNavigateToSettings,
     this.showSidebar = true,
     this.selectedCurrency = 'ZAR',
@@ -103,17 +109,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   double get _totalNetWorthInSelectedCurrency {
-    if (_accounts.isEmpty) return 0.0;
-    double totalZar = 0;
+    double liquidZar = 0;
     for (final acc in _accounts) {
-      totalZar += CurrencyFormatter.convert(
+      liquidZar += CurrencyFormatter.convert(
         amount: acc.nativeBalance,
         fromCurrency: acc.primaryCurrency,
         toCurrency: 'ZAR',
       );
     }
+    final consolidatedZar = SqliteService.instance.calculateConsolidatedNetWorthZar(
+      liquidAccountsTotalZar: liquidZar,
+    );
     return CurrencyFormatter.convert(
-      amount: totalZar,
+      amount: consolidatedZar,
       fromCurrency: 'ZAR',
       toCurrency: _selectedCurrency,
     );
@@ -325,6 +333,38 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 },
               ),
 
+              // Global Search Bar (Mobile)
+              InkWell(
+                onTap: () => GlobalSearchDialog.show(context, onNavigateToTab: (idx) {
+                  if (idx == 1 && widget.onNavigateToAssets != null) widget.onNavigateToAssets!();
+                  if (idx == 2) widget.onNavigateToLedger();
+                  if (idx == 3 && widget.onNavigateToSettings != null) widget.onNavigateToSettings!();
+                }),
+                borderRadius: BorderRadius.circular(10),
+                child: Container(
+                  margin: const EdgeInsets.only(bottom: 16),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: ZivaTheme.bgCard,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: ZivaTheme.borderCard),
+                  ),
+                  child: const Row(
+                    children: [
+                      Icon(Icons.search_rounded, size: 18, color: ZivaTheme.gold400),
+                      SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'Search transactions, assets, debts...',
+                          style: TextStyle(fontSize: 12, color: ZivaTheme.textMuted),
+                        ),
+                      ),
+                      Icon(Icons.tune_rounded, size: 14, color: ZivaTheme.textMuted),
+                    ],
+                  ),
+                ),
+              ),
+
               // Total Net Worth Card (Mobile Single Column)
               Card(
                 child: Padding(
@@ -474,6 +514,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
               const SizedBox(height: 24),
 
+              // Executive Analytics Hub & Trends
+              const AnalyticsHubSection(),
+
+              const SizedBox(height: 24),
+
+              // Asset Holdings Summary
+              AssetSummaryWidget(
+                onNavigateToAssets: () {
+                  if (widget.onNavigateToAssets != null) widget.onNavigateToAssets!();
+                },
+              ),
+
+              const SizedBox(height: 24),
+
+              // Debt & Credit Ledger Summary
+              DebtCreditSummaryWidget(
+                onNavigateToLedger: widget.onNavigateToLedger,
+              ),
+
+              const SizedBox(height: 24),
+
               // Recent Transactions Header
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -553,8 +614,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
               onCurrencyChanged: (curr) => setState(() => _selectedCurrency = curr),
               onSecretAdminTrigger: _onBrandHeaderTapped,
               onTabSelected: (idx) {
-                if (idx == 1) widget.onNavigateToLedger();
-                if (idx == 2 && widget.onNavigateToSettings != null) {
+                if (idx == 1 && widget.onNavigateToAssets != null) {
+                  widget.onNavigateToAssets!();
+                }
+                if (idx == 2) widget.onNavigateToLedger();
+                if (idx == 3 && widget.onNavigateToSettings != null) {
                   widget.onNavigateToSettings!();
                 }
               },
@@ -590,56 +654,95 @@ class _DashboardScreenState extends State<DashboardScreen> {
         // Center Header Top Bar
         Container(
           height: 68,
-          padding: const EdgeInsets.symmetric(horizontal: 24),
+          padding: const EdgeInsets.symmetric(horizontal: 16),
           decoration: const BoxDecoration(
             color: ZivaTheme.bgSurface,
             border: Border(bottom: BorderSide(color: ZivaTheme.borderCard)),
           ),
-          child: Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Text(
-                      'EXECUTIVE FINANCIAL COMMAND CENTER',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 1.1,
-                        color: ZivaTheme.textPrimary,
+          child: LayoutBuilder(
+            builder: (context, headerBox) {
+              final isCompact = headerBox.maxWidth < 650;
+              return Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Text(
+                          'EXECUTIVE FINANCIAL COMMAND CENTER',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 1.0,
+                            color: ZivaTheme.textPrimary,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        Text(
+                          'Real-Time Portfolio Telemetry • Widescreen Mode (${constraints.maxWidth.toInt()}px)',
+                          style: const TextStyle(fontSize: 10.5, color: ZivaTheme.textMuted),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  // Desktop Global Search Bar (Responsive)
+                  InkWell(
+                    onTap: () => GlobalSearchDialog.show(context, onNavigateToTab: (idx) {
+                      if (idx == 1 && widget.onNavigateToAssets != null) widget.onNavigateToAssets!();
+                      if (idx == 2) widget.onNavigateToLedger();
+                      if (idx == 3 && widget.onNavigateToSettings != null) widget.onNavigateToSettings!();
+                    }),
+                    borderRadius: BorderRadius.circular(8),
+                    child: Container(
+                      height: 36,
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                      decoration: BoxDecoration(
+                        color: ZivaTheme.bgCore,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: ZivaTheme.borderCard),
                       ),
-                      overflow: TextOverflow.ellipsis,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.search_rounded, size: 15, color: ZivaTheme.gold400),
+                          const SizedBox(width: 6),
+                          Text(
+                            isCompact ? 'Search...' : 'Search portfolio...',
+                            style: const TextStyle(fontSize: 11.5, color: ZivaTheme.textMuted),
+                          ),
+                          const SizedBox(width: 6),
+                          const Text('⌘K', style: TextStyle(fontSize: 9.5, color: ZivaTheme.textMuted, fontWeight: FontWeight.bold)),
+                        ],
+                      ),
                     ),
-                    Text(
-                      'Real-Time Portfolio Telemetry • Widescreen Mode (${constraints.maxWidth.toInt()}px)',
-                      style: const TextStyle(fontSize: 11, color: ZivaTheme.textMuted),
-                      overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(width: 6),
+                  IconButton(
+                    onPressed: _refreshData,
+                    icon: const Icon(Icons.refresh_rounded, size: 18, color: ZivaTheme.textSecondary),
+                    tooltip: 'Invalidate cache & re-query BigQuery',
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                  ),
+                  const SizedBox(width: 6),
+                  ElevatedButton.icon(
+                    onPressed: _openQuickEntry,
+                    icon: const Icon(Icons.add, size: 15),
+                    label: Text(isCompact ? 'Log' : 'Log Transaction'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: ZivaTheme.gold500,
+                      foregroundColor: Colors.black,
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                      textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              IconButton(
-                onPressed: _refreshData,
-                icon: const Icon(Icons.refresh_rounded, size: 20, color: ZivaTheme.textSecondary),
-                tooltip: 'Invalidate cache & re-query BigQuery',
-              ),
-              const SizedBox(width: 8),
-              ElevatedButton.icon(
-                onPressed: _openQuickEntry,
-                icon: const Icon(Icons.add, size: 16),
-                label: const Text('Log Transaction'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: ZivaTheme.gold500,
-                  foregroundColor: Colors.black,
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                  textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                ),
-              ),
-            ],
+                  ),
+                ],
+              );
+            },
           ),
         ),
 
@@ -774,7 +877,58 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 const SizedBox(height: 28),
 
                 // -------------------------------------------------------
-                // 2. RESTORED ZERO-BASED ENVELOPE BUDGET SYSTEM & ALLOCATION
+                // 2. EXECUTIVE ANALYTICS HUB & TIME-SERIES TRENDS
+                // -------------------------------------------------------
+                const AnalyticsHubSection(),
+
+                const SizedBox(height: 28),
+
+                // -------------------------------------------------------
+                // 3. ASSET REGISTRY & DEBT/CREDIT LEDGER CORE MODULES
+                // -------------------------------------------------------
+                LayoutBuilder(
+                  builder: (context, moduleConstraints) {
+                    if (moduleConstraints.maxWidth >= 900) {
+                      return Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: AssetSummaryWidget(
+                              onNavigateToAssets: () {
+                                if (widget.onNavigateToAssets != null) widget.onNavigateToAssets!();
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 20),
+                          Expanded(
+                            child: DebtCreditSummaryWidget(
+                              onNavigateToLedger: widget.onNavigateToLedger,
+                            ),
+                          ),
+                        ],
+                      );
+                    } else {
+                      return Column(
+                        children: [
+                          AssetSummaryWidget(
+                            onNavigateToAssets: () {
+                              if (widget.onNavigateToAssets != null) widget.onNavigateToAssets!();
+                            },
+                          ),
+                          const SizedBox(height: 20),
+                          DebtCreditSummaryWidget(
+                            onNavigateToLedger: widget.onNavigateToLedger,
+                          ),
+                        ],
+                      );
+                    }
+                  },
+                ),
+
+                const SizedBox(height: 28),
+
+                // -------------------------------------------------------
+                // 4. RESTORED ZERO-BASED ENVELOPE BUDGET SYSTEM & ALLOCATION
                 // -------------------------------------------------------
                 EnvelopeOverviewSection(
                   envelopes: _envelopes,

@@ -166,52 +166,72 @@ class DesktopSidebar extends StatelessWidget {
             ),
           ),
 
-          const SizedBox(height: 20),
+          const SizedBox(height: 14),
           const Divider(color: ZivaTheme.borderCard, height: 1),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
 
-          // NAVIGATION BUTTONS:
-          // 1. DEDICATED HOME / COMMAND CENTER BUTTON (PERSISTENT & VISUALLY DISTINCT)
-          _buildSidebarNavButton(
-            icon: Icons.dashboard_rounded,
-            label: 'Command Center (Home)',
-            badge: 'HOME',
-            isActive: currentTabIndex == 0,
-            isHomeButton: true,
-            onTap: () {
-              setUrlAnchor('#command-center');
-              onTabSelected(0);
-            },
+          // NAVIGATION BUTTONS: Scrollable middle section
+          Expanded(
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // 1. DEDICATED HOME / COMMAND CENTER BUTTON (PERSISTENT & VISUALLY DISTINCT)
+                  _buildSidebarNavButton(
+                    icon: Icons.dashboard_rounded,
+                    label: 'Command Center (Home)',
+                    badge: 'HOME',
+                    isActive: currentTabIndex == 0,
+                    isHomeButton: true,
+                    onTap: () {
+                      setUrlAnchor('#command-center');
+                      onTabSelected(0);
+                    },
+                  ),
+
+                  // 2. ASSET REGISTRY & MANAGER
+                  _buildSidebarNavButton(
+                    icon: Icons.account_balance_rounded,
+                    label: 'Asset Registry & Manager',
+                    badge: 'VALUATION',
+                    isActive: currentTabIndex == 1,
+                    onTap: () {
+                      setUrlAnchor('#assets');
+                      onTabSelected(1);
+                    },
+                  ),
+
+                  // 3. DEBT & CREDIT LEDGER
+                  _buildSidebarNavButton(
+                    icon: Icons.receipt_long_rounded,
+                    label: 'Debt & Credit Ledger',
+                    badge: 'SPLITWISE',
+                    isActive: currentTabIndex == 2,
+                    onTap: () {
+                      setUrlAnchor('#ledger');
+                      onTabSelected(2);
+                    },
+                  ),
+
+                  // 4. SYSTEM SETTINGS & PROOF OF DEPLOYMENT
+                  _buildSidebarNavButton(
+                    icon: Icons.tune_rounded,
+                    label: 'System Settings & OTA',
+                    isActive: currentTabIndex == 3,
+                    onTap: () {
+                      setUrlAnchor('#settings');
+                      onTabSelected(3);
+                    },
+                  ),
+                ],
+              ),
+            ),
           ),
-
-          // 2. DEBT & CREDIT LEDGER
-          _buildSidebarNavButton(
-            icon: Icons.receipt_long_rounded,
-            label: 'Debt & Credit Ledger',
-            isActive: currentTabIndex == 1,
-            onTap: () {
-              setUrlAnchor('#ledger');
-              onTabSelected(1);
-            },
-          ),
-
-          // 3. SYSTEM SETTINGS & PROOF OF DEPLOYMENT
-          _buildSidebarNavButton(
-            icon: Icons.tune_rounded,
-            label: 'System Settings & OTA',
-            isActive: currentTabIndex == 2,
-            onTap: () {
-              setUrlAnchor('#settings');
-              onTabSelected(2);
-            },
-          ),
-
-          const Spacer(),
 
           // BigQuery Warehouse Status Telemetry Widget
           Container(
-            margin: const EdgeInsets.all(16),
-            padding: const EdgeInsets.all(14),
+            margin: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
               color: ZivaTheme.bgCore,
               borderRadius: BorderRadius.circular(10),
@@ -219,6 +239,7 @@ class DesktopSidebar extends StatelessWidget {
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
                 Row(
                   children: [

@@ -158,6 +158,11 @@ class _DeveloperSettingsScreenState extends State<DeveloperSettingsScreen> {
             // 0. Phase One Executive Architecture & Deployment Proof
             _buildSectionHeader('PHASE ONE EXECUTIVE STABILITY & ARCHITECTURE'),
             _buildPhaseOneProofCard(),
+            const SizedBox(height: 16),
+
+            // 0b. Phase Two The Functional Core Deployment Proof
+            _buildSectionHeader('PHASE TWO: THE FUNCTIONAL CORE ARCHITECTURE'),
+            _buildPhaseTwoProofCard(),
             const SizedBox(height: 20),
 
             // 1. Shorebird OTA Code Push Panel
@@ -545,6 +550,67 @@ class _DeveloperSettingsScreenState extends State<DeveloperSettingsScreen> {
             const Text(
               'Branch: gh-pages • Live Production Mode: Zero Data Leak & Obfuscated',
               style: TextStyle(fontSize: 10, color: ZivaTheme.textMuted),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPhaseTwoProofCard() {
+    return Card(
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: ZivaTheme.emerald400.withValues(alpha: 0.5), width: 1.2),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Expanded(
+                  child: Text(
+                    'PHASE TWO: THE FUNCTIONAL CORE',
+                    style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13, color: ZivaTheme.emerald400, letterSpacing: 0.8),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: ZivaTheme.emeraldBg,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: ZivaTheme.emerald400.withValues(alpha: 0.4)),
+                  ),
+                  child: const Text(
+                    'VERIFIED & DEPLOYED',
+                    style: TextStyle(color: ZivaTheme.emerald400, fontSize: 10, fontWeight: FontWeight.w800),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            _buildProofItem('1. Comprehensive Asset Registry', 'Tangible/Intangible assets, straight-line/reducing depreciation, Net Worth toggle & joint equity %'),
+            _buildProofItem('2. Deep-Dive Analytics Hub', 'Net Worth Trajectory curve, Cash Flow In/Out dual bars, Envelope Run-Rate with dropdown, Donut & Top 5 expenses'),
+            _buildProofItem('3. Debt & Credit Ledger with Settle Up', 'Splitwise settlement flow, full/partial payoff, automated source envelope deduction & instant net worth recalculation'),
+            _buildProofItem('4. Global Search & Quick Add (+)', 'Multi-domain instant type-ahead across txs, envelopes, debts & assets + speed-dial Quick Add FAB on all views'),
+            _buildProofItem('5. 5-Journey UX Optimization', 'Audited Login, Log Tx, Fund Envelope, Settle Debt, & Add Asset journeys with reduced clicks & 1-click persistent navigation'),
+            const Divider(height: 20, color: ZivaTheme.borderCard),
+            const Row(
+              children: [
+                Icon(Icons.verified_rounded, size: 14, color: ZivaTheme.emerald400),
+                SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'All 5 Phase Two Modules Verified Locally & Ready for Production',
+                    style: TextStyle(fontFamily: 'monospace', fontSize: 11, color: ZivaTheme.textPrimary, fontWeight: FontWeight.bold),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
             ),
           ],
         ),

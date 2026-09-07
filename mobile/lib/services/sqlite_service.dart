@@ -3,10 +3,12 @@ import 'package:flutter/foundation.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
-import '../models/transaction_model.dart';
 import '../models/account_model.dart';
+import '../models/asset_model.dart';
+import '../models/debt_model.dart';
 import '../models/envelope_model.dart';
 import '../models/sync_queue_item.dart';
+import '../models/transaction_model.dart';
 import 'api_service.dart';
 
 class SqliteService {
@@ -21,6 +23,197 @@ class SqliteService {
   final List<AccountModel> _mockAccounts = [];
   final List<SyncQueueItem> _mockQueue = [];
   final List<EnvelopeModel> _mockEnvelopes = [];
+  final List<AssetModel> _mockAssets = [];
+  final List<DebtModel> _mockDebts = [];
+
+  static final List<AssetModel> defaultAssets = [
+    AssetModel(
+      id: 'ASSET_REAL_ESTATE_01',
+      name: 'Camps Bay Ocean Villa',
+      type: AssetType.tangible,
+      category: AssetCategory.realEstate,
+      currentValueZar: 14200000.0,
+      acquisitionCostZar: 12500000.0,
+      acquisitionDate: DateTime(2022, 3, 15),
+      depreciationMethod: DepreciationMethod.straightLine,
+      usefulLifeYears: 30.0,
+      depreciationRatePercent: 3.33,
+      location: 'Camps Bay, Cape Town (Western Cape)',
+      registrationNumber: 'Deed T90210/2022',
+      documentationReference: 'Old Mutual Insure Policy #ZA-CPT-9921',
+      ownershipType: OwnershipType.solo,
+      myOwnershipPercentage: 100.0,
+      partnerOwnershipPercentage: 0.0,
+      notes: 'Luxury residential primary holding with uninterrupted Atlantic views',
+      includeInNetWorth: true,
+      createdAt: DateTime(2022, 3, 15),
+      updatedAt: DateTime.now(),
+    ),
+    AssetModel(
+      id: 'ASSET_VEHICLE_01',
+      name: 'Porsche 911 GT3 (992)',
+      type: AssetType.tangible,
+      category: AssetCategory.vehicle,
+      currentValueZar: 2950000.0,
+      acquisitionCostZar: 3200000.0,
+      acquisitionDate: DateTime(2023, 6, 10),
+      depreciationMethod: DepreciationMethod.reducingBalance,
+      usefulLifeYears: 5.0,
+      depreciationRatePercent: 15.0,
+      location: 'Private Garage, Camps Bay',
+      registrationNumber: 'CA 911-ZAR',
+      documentationReference: 'Discovery Insure Comprehensive #DISC-VEH-4412',
+      ownershipType: OwnershipType.solo,
+      myOwnershipPercentage: 100.0,
+      partnerOwnershipPercentage: 0.0,
+      linkedLiabilityId: 'DEBT_VEHICLE_FINANCE',
+      linkedLiabilityName: 'FNB Asset Finance (Porsche 911)',
+      linkedLiabilityAmountZar: 1100000.0,
+      notes: 'High-performance GT vehicle held under asset finance schedule',
+      includeInNetWorth: true,
+      createdAt: DateTime(2023, 6, 10),
+      updatedAt: DateTime.now(),
+    ),
+    AssetModel(
+      id: 'ASSET_IP_ALGO_01',
+      name: 'Antigravity AI Quantitative Algorithm',
+      type: AssetType.intangible,
+      category: AssetCategory.ipPatent,
+      currentValueZar: 8000000.0,
+      acquisitionCostZar: 4500000.0,
+      acquisitionDate: DateTime(2024, 1, 20),
+      depreciationMethod: DepreciationMethod.amortization,
+      usefulLifeYears: 10.0,
+      depreciationRatePercent: 10.0,
+      location: 'GCP Cloud Vault & GitHub Enterprise',
+      registrationNumber: 'Patent Filing ZA2026/00192',
+      documentationReference: 'IP Assignment Deed & Syndicate Escrow',
+      ownershipType: OwnershipType.joint,
+      myOwnershipPercentage: 70.0,
+      partnerOwnershipPercentage: 30.0,
+      notes: 'Proprietary automated liquidity routing and forecasting engine',
+      includeInNetWorth: true,
+      createdAt: DateTime(2024, 1, 20),
+      updatedAt: DateTime.now(),
+    ),
+    AssetModel(
+      id: 'ASSET_CRYPTO_01',
+      name: 'Bitcoin Treasury Reserve (BTC Cold Vault)',
+      type: AssetType.intangible,
+      category: AssetCategory.digitalAsset,
+      currentValueZar: 1850000.0,
+      acquisitionCostZar: 1200000.0,
+      acquisitionDate: DateTime(2023, 11, 5),
+      depreciationMethod: DepreciationMethod.none,
+      usefulLifeYears: 0.0,
+      depreciationRatePercent: 0.0,
+      location: 'Multisig Ledger Hardware Vault (Offline Custody)',
+      registrationNumber: 'xpub6D4B...vault-01',
+      documentationReference: 'Custody Vault Protocol v2.1',
+      ownershipType: OwnershipType.solo,
+      myOwnershipPercentage: 100.0,
+      partnerOwnershipPercentage: 0.0,
+      notes: 'Strategic institutional inflation hedge in multi-sig custody',
+      includeInNetWorth: true,
+      createdAt: DateTime(2023, 11, 5),
+      updatedAt: DateTime.now(),
+    ),
+  ];
+
+  static final List<DebtModel> defaultDebts = [
+    DebtModel(
+      id: 'DEBT_VEHICLE_FINANCE',
+      counterparty: 'FNB Asset Finance (WesBank)',
+      direction: DebtDirection.owedByMe,
+      debtType: DebtType.assetFinance,
+      originalPrincipalZar: 1800000.0,
+      currentOutstandingBalanceZar: 1100000.0,
+      currency: 'ZAR',
+      interestRatePercent: 11.75,
+      minimumMonthlyPaymentZar: 34500.0,
+      dueDate: DateTime.now().add(const Duration(days: 8)),
+      linkedEnvelopeId: 'CAT_SINKING_MAINTENANCE',
+      linkedEnvelopeName: 'Vehicle Maintenance & Insurance Sinking Fund',
+      status: DebtStatus.current,
+      notes: 'Porsche 911 GT3 structured commercial installment sale',
+      repayments: [
+        DebtRepaymentModel(
+          id: 'REP_VEH_01',
+          debtId: 'DEBT_VEHICLE_FINANCE',
+          amountZar: 34500.0,
+          paymentDate: DateTime.now().subtract(const Duration(days: 22)),
+          paymentMethod: 'FNB Debit Order',
+          sourceEnvelopeId: 'CAT_SINKING_MAINTENANCE',
+          sourceEnvelopeName: 'Vehicle Maintenance & Insurance Sinking Fund',
+          notes: 'Scheduled monthly installment',
+          createdAt: DateTime.now().subtract(const Duration(days: 22)),
+        ),
+      ],
+      createdAt: DateTime(2023, 6, 10),
+      updatedAt: DateTime.now(),
+    ),
+    DebtModel(
+      id: 'DEBT_DISCOVERY_CARD',
+      counterparty: 'Discovery Bank Corporate Credit',
+      direction: DebtDirection.owedByMe,
+      debtType: DebtType.creditCard,
+      originalPrincipalZar: 150000.0,
+      currentOutstandingBalanceZar: 38500.0,
+      currency: 'ZAR',
+      interestRatePercent: 14.5,
+      minimumMonthlyPaymentZar: 8500.0,
+      dueDate: DateTime.now().add(const Duration(days: 20)),
+      linkedEnvelopeId: 'CAT_TECH_CLOUD',
+      linkedEnvelopeName: 'Cloud SaaS & Productivity Tools',
+      status: DebtStatus.current,
+      notes: 'Operational revolving cloud and travel card',
+      repayments: [],
+      createdAt: DateTime(2024, 2, 1),
+      updatedAt: DateTime.now(),
+    ),
+    DebtModel(
+      id: 'CREDIT_VENTURE_ADVANCE',
+      counterparty: 'Kudzai Chimwaza (Syndicated Venture)',
+      direction: DebtDirection.owedToMe,
+      debtType: DebtType.personalLoan,
+      originalPrincipalZar: 450000.0,
+      currentOutstandingBalanceZar: 280000.0,
+      currency: 'ZAR',
+      interestRatePercent: 8.5,
+      minimumMonthlyPaymentZar: 35000.0,
+      dueDate: DateTime.now().add(const Duration(days: 14)),
+      status: DebtStatus.current,
+      notes: 'Working capital bridge facility for African tech venture round',
+      repayments: [
+        DebtRepaymentModel(
+          id: 'REP_KUD_01',
+          debtId: 'CREDIT_VENTURE_ADVANCE',
+          amountZar: 170000.0,
+          paymentDate: DateTime.now().subtract(const Duration(days: 35)),
+          paymentMethod: 'EFT Wire',
+          notes: 'Tranche 1 repayment received',
+          createdAt: DateTime.now().subtract(const Duration(days: 35)),
+        ),
+      ],
+      createdAt: DateTime(2025, 10, 1),
+      updatedAt: DateTime.now(),
+    ),
+    DebtModel(
+      id: 'CREDIT_APEX_INVOICE',
+      counterparty: 'Apex Enterprise Consulting Ltd',
+      direction: DebtDirection.owedToMe,
+      debtType: DebtType.invoiceReceivable,
+      originalPrincipalZar: 185000.0,
+      currentOutstandingBalanceZar: 185000.0,
+      currency: 'ZAR',
+      dueDate: DateTime.now().add(const Duration(days: 5)),
+      status: DebtStatus.current,
+      notes: 'Q1 Executive Advisory and AI architecture advisory retainer',
+      repayments: [],
+      createdAt: DateTime.now().subtract(const Duration(days: 10)),
+      updatedAt: DateTime.now(),
+    ),
+  ];
 
   static final List<EnvelopeModel> defaultEnvelopes = [
     const EnvelopeModel(
@@ -114,13 +307,23 @@ class SqliteService {
   ];
 
   SqliteService._internal() {
-    _ensureDefaultEnvelopes();
+    _ensureDefaultData();
   }
 
-  void _ensureDefaultEnvelopes() {
+  void _ensureDefaultData() {
     if (_mockEnvelopes.isEmpty) {
       _mockEnvelopes.addAll(defaultEnvelopes);
     }
+    if (_mockAssets.isEmpty) {
+      _mockAssets.addAll(defaultAssets);
+    }
+    if (_mockDebts.isEmpty) {
+      _mockDebts.addAll(defaultDebts);
+    }
+  }
+
+  void _ensureDefaultEnvelopes() {
+    _ensureDefaultData();
   }
 
   /// Invalidate and clear all in-memory and local caches so fresh queries
@@ -130,7 +333,9 @@ class SqliteService {
     _mockAccounts.clear();
     _mockQueue.clear();
     _mockEnvelopes.clear();
-    _ensureDefaultEnvelopes();
+    _mockAssets.clear();
+    _mockDebts.clear();
+    _ensureDefaultData();
     debugPrint('[SqliteService] Caches invalidated. Clean live state active.');
   }
 
@@ -683,5 +888,184 @@ class SqliteService {
 
       _mockEnvelopes[idx] = env.copyWith(actualSpentZar: newSpent);
     }
+  }
+
+  // =========================================================================
+  // ASSET REGISTRY & MANAGER METHODS
+  // =========================================================================
+
+  /// Fetch all active assets
+  Future<List<AssetModel>> getAssets() async {
+    _ensureDefaultData();
+    return List<AssetModel>.from(_mockAssets);
+  }
+
+  /// Save or update an asset
+  Future<void> saveAsset(AssetModel asset) async {
+    _ensureDefaultData();
+    final idx = _mockAssets.indexWhere((a) => a.id == asset.id);
+    if (idx != -1) {
+      _mockAssets[idx] = asset;
+    } else {
+      _mockAssets.insert(0, asset);
+    }
+  }
+
+  /// Delete an asset
+  Future<void> deleteAsset(String id) async {
+    _ensureDefaultData();
+    _mockAssets.removeWhere((a) => a.id == id);
+  }
+
+  /// Total gross valuation of all assets
+  double getTotalAssetsValueZar() {
+    _ensureDefaultData();
+    return _mockAssets.fold<double>(0.0, (sum, a) => sum + a.currentValueZar);
+  }
+
+  /// Total net book value (cost - depreciation) of all assets
+  double getTotalAssetsNetBookValueZar() {
+    _ensureDefaultData();
+    return _mockAssets.fold<double>(0.0, (sum, a) => sum + a.netBookValueZar);
+  }
+
+  /// Net equity contribution of all included assets to Net Worth
+  double getTotalAssetsNetWorthContributionZar() {
+    _ensureDefaultData();
+    return _mockAssets.fold<double>(0.0, (sum, a) => sum + a.effectiveNetWorthContributionZar);
+  }
+
+  // =========================================================================
+  // DEBT & CREDIT LEDGER METHODS
+  // =========================================================================
+
+  /// Fetch all debts and credits
+  Future<List<DebtModel>> getDebts({DebtDirection? direction}) async {
+    _ensureDefaultData();
+    if (direction != null) {
+      return _mockDebts.where((d) => d.direction == direction).toList();
+    }
+    return List<DebtModel>.from(_mockDebts);
+  }
+
+  /// Save or update a debt/credit entry
+  Future<void> saveDebt(DebtModel debt) async {
+    _ensureDefaultData();
+    final idx = _mockDebts.indexWhere((d) => d.id == debt.id);
+    if (idx != -1) {
+      _mockDebts[idx] = debt;
+    } else {
+      _mockDebts.insert(0, debt);
+    }
+  }
+
+  /// Delete a debt/credit entry
+  Future<void> deleteDebt(String id) async {
+    _ensureDefaultData();
+    _mockDebts.removeWhere((d) => d.id == id);
+  }
+
+  /// Record a repayment / settlement event against a debt record
+  Future<DebtModel?> recordDebtRepayment({
+    required String debtId,
+    required double amountZar,
+    required String paymentMethod,
+    String? sourceEnvelopeId,
+    String notes = '',
+    DateTime? paymentDate,
+  }) async {
+    _ensureDefaultData();
+    final idx = _mockDebts.indexWhere((d) => d.id == debtId);
+    if (idx == -1) return null;
+
+    final debt = _mockDebts[idx];
+    final payDate = paymentDate ?? DateTime.now();
+    final newBalance = (debt.currentOutstandingBalanceZar - amountZar).clamp(0.0, double.infinity);
+    final isFullyPaid = newBalance <= 0.01;
+
+    final repayment = DebtRepaymentModel(
+      id: 'REP_${DateTime.now().millisecondsSinceEpoch}',
+      debtId: debtId,
+      amountZar: amountZar,
+      paymentDate: payDate,
+      paymentMethod: paymentMethod,
+      sourceEnvelopeId: sourceEnvelopeId,
+      sourceEnvelopeName: sourceEnvelopeId != null
+          ? _mockEnvelopes.firstWhere((e) => e.categoryId == sourceEnvelopeId, orElse: () => _mockEnvelopes.first).categoryName
+          : null,
+      notes: notes,
+      createdAt: DateTime.now(),
+    );
+
+    final updatedRepayments = List<DebtRepaymentModel>.from(debt.repayments)..insert(0, repayment);
+
+    final updatedDebt = debt.copyWith(
+      currentOutstandingBalanceZar: newBalance,
+      status: isFullyPaid ? DebtStatus.paidOff : debt.status,
+      repayments: updatedRepayments,
+    );
+
+    _mockDebts[idx] = updatedDebt;
+
+    // Optimistically deduct from linked/source envelope if specified
+    if (sourceEnvelopeId != null && amountZar > 0) {
+      final envIdx = _mockEnvelopes.indexWhere((e) => e.categoryId == sourceEnvelopeId);
+      if (envIdx != -1) {
+        final env = _mockEnvelopes[envIdx];
+        _mockEnvelopes[envIdx] = env.copyWith(
+          actualSpentZar: env.actualSpentZar + amountZar,
+        );
+      }
+    }
+
+    // Also deduct linked liability from linked asset if any
+    final assetIdx = _mockAssets.indexWhere((a) => a.linkedLiabilityId == debtId);
+    if (assetIdx != -1) {
+      final asset = _mockAssets[assetIdx];
+      final newLiab = (asset.linkedLiabilityAmountZar - amountZar).clamp(0.0, double.infinity);
+      _mockAssets[assetIdx] = asset.copyWith(linkedLiabilityAmountZar: newLiab);
+    }
+
+    return updatedDebt;
+  }
+
+  /// Full payoff Settle Up action
+  Future<DebtModel?> settleDebt(String debtId, {String paymentMethod = 'EFT Wire', String? sourceEnvelopeId}) async {
+    _ensureDefaultData();
+    final idx = _mockDebts.indexWhere((d) => d.id == debtId);
+    if (idx == -1) return null;
+    final debt = _mockDebts[idx];
+    return recordDebtRepayment(
+      debtId: debtId,
+      amountZar: debt.currentOutstandingBalanceZar,
+      paymentMethod: paymentMethod,
+      sourceEnvelopeId: sourceEnvelopeId ?? debt.linkedEnvelopeId,
+      notes: 'Full Payoff / Settle Up',
+    );
+  }
+
+  /// Total active debt I owe (Liabilities)
+  double getTotalDebtsOwedByMeZar() {
+    _ensureDefaultData();
+    return _mockDebts
+        .where((d) => d.direction == DebtDirection.owedByMe && !d.isPaidOff)
+        .fold<double>(0.0, (sum, d) => sum + d.currentOutstandingBalanceZar);
+  }
+
+  /// Total debt owed to me (Receivables)
+  double getTotalDebtsOwedToMeZar() {
+    _ensureDefaultData();
+    return _mockDebts
+        .where((d) => d.direction == DebtDirection.owedToMe && !d.isPaidOff)
+        .fold<double>(0.0, (sum, d) => sum + d.currentOutstandingBalanceZar);
+  }
+
+  /// Consolidated Net Worth across Liquid Accounts, Physical/Intangible Assets, and Debts/Receivables
+  double calculateConsolidatedNetWorthZar({double liquidAccountsTotalZar = 0.0}) {
+    _ensureDefaultData();
+    final assetsContribution = getTotalAssetsNetWorthContributionZar();
+    final receivables = getTotalDebtsOwedToMeZar();
+    final liabilities = getTotalDebtsOwedByMeZar();
+    return liquidAccountsTotalZar + assetsContribution + receivables - liabilities;
   }
 }

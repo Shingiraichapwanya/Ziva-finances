@@ -849,18 +849,18 @@ class _EnvelopeOverviewSectionState extends State<EnvelopeOverviewSection> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
+              const Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Expanded(
+                  Expanded(
                     child: Text(
                       'PORTFOLIO ALLOCATION DISTRIBUTION',
                       style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 0.8, color: ZivaTheme.textMuted),
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  const Text(
+                  SizedBox(width: 8),
+                  Text(
                     'Target 50/30/20',
                     style: TextStyle(fontSize: 10, color: ZivaTheme.gold400, fontWeight: FontWeight.w600),
                   ),
