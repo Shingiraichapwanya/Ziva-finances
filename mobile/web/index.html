@@ -7,11 +7,14 @@
     (function() {
       var baseEl = document.querySelector('base');
       if (baseEl && window.location && window.location.pathname) {
-        var path = window.location.pathname;
-        if (path.indexOf('/ziva-finaces/') === 0) {
-          baseEl.setAttribute('href', '/ziva-finaces/');
+        var path = window.location.pathname.toLowerCase();
+        if (path.indexOf('/ziva-finances') === 0) {
+          var seg = window.location.pathname.split('/')[1];
+          baseEl.setAttribute('href', '/' + seg + '/');
+        } else if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+          baseEl.setAttribute('href', '/');
         } else {
-          baseEl.setAttribute('href', '/Ziva-finaces/');
+          baseEl.setAttribute('href', '/Ziva-finances/');
         }
       }
     })();
