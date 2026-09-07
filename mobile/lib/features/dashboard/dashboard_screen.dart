@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../core/config/app_environment.dart';
+import '../../core/currency/currency_conversion.dart';
+import '../../core/currency/currency_display_state.dart';
 import '../../core/layout/responsive_layout.dart';
 import '../../core/theme/ziva_theme.dart';
 import '../../core/utils/currency_formatter.dart';
@@ -126,7 +128,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   double get _totalNetWorthInSelectedCurrency {
     double liquidZar = 0;
     for (final acc in _accounts) {
-      liquidZar += CurrencyFormatter.convert(
+      liquidZar += convertAmount(
         amount: acc.nativeBalance,
         fromCurrency: acc.primaryCurrency,
         toCurrency: 'ZAR',
@@ -135,7 +137,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final consolidatedZar = SqliteService.instance.calculateConsolidatedNetWorthZar(
       liquidAccountsTotalZar: liquidZar,
     );
-    return CurrencyFormatter.convert(
+    return convertAmount(
       amount: consolidatedZar,
       fromCurrency: 'ZAR',
       toCurrency: _selectedCurrency,
@@ -147,13 +149,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (tierAccounts.isEmpty) return 0.0;
     double tierTotalZar = 0;
     for (final acc in tierAccounts) {
-      tierTotalZar += CurrencyFormatter.convert(
+      tierTotalZar += convertAmount(
         amount: acc.nativeBalance,
         fromCurrency: acc.primaryCurrency,
         toCurrency: 'ZAR',
       );
     }
-    return CurrencyFormatter.convert(
+    return convertAmount(
       amount: tierTotalZar,
       fromCurrency: 'ZAR',
       toCurrency: _selectedCurrency,
@@ -409,10 +411,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           const SizedBox(width: 8),
                           // Currency Selector Pills
                           Row(
-                            children: ['ZAR', 'USD', 'ZiG'].map((curr) {
-                              final isSelected = _selectedCurrency == curr;
+                            children: ['USD', 'ZWG', 'ZAR'].map((curr) {
+                              final normalizedSelected = _selectedCurrency == 'ZiG' ? 'ZWG' : _selectedCurrency;
+                              final isSelected = normalizedSelected == curr;
                               return GestureDetector(
-                                onTap: () => setState(() => _selectedCurrency = curr),
+                                onTap: () {
+                                  CurrencyDisplayState.instance.setDisplayCurrency(curr);
+                                  setState(() => _selectedCurrency = curr);
+                                },
                                 child: Container(
                                   margin: const EdgeInsets.only(left: 4),
                                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),

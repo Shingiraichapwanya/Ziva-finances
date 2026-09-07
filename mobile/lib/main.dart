@@ -17,6 +17,9 @@ import 'features/scenarios/scenario_planner_screen.dart';
 import 'features/settings/developer_settings_screen.dart';
 import 'features/tax/tax_automation_screen.dart';
 import 'features/vault/legacy_vault_screen.dart';
+import 'core/currency/currency_display_state.dart';
+import 'features/exchange_hub/exchange_hub_screen.dart';
+import 'services/auth_session.dart';
 import 'services/biometric_service.dart';
 import 'services/sync_engine.dart';
 
@@ -79,13 +82,42 @@ class _MainNavigationShellState extends State<MainNavigationShell> with WidgetsB
   bool _isUnlocked = false;
   bool _isBackgroundMasked = false;
   int _currentTabIndex = 0;
-  String _selectedCurrency = 'ZAR';
+  String _selectedCurrency = CurrencyDisplayState.instance.currentDisplayCurrency;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    CurrencyDisplayState.instance.currencyNotifier.addListener(_onCurrencyDisplayChanged);
     _initTabFromUrl();
+    _checkSavedSession();
+  }
+
+  void _onCurrencyDisplayChanged() {
+    if (mounted) {
+      setState(() {
+        _selectedCurrency = CurrencyDisplayState.instance.currentDisplayCurrency;
+      });
+    }
+  }
+
+  Future<void> _checkSavedSession() async {
+    final restored = await AuthSession.instance.restoreSessionIfPossible();
+    if (restored && mounted) {
+      setState(() {
+        _isUnlocked = true;
+        _isBackgroundMasked = false;
+      });
+    }
+  }
+
+  Future<void> _lockSession() async {
+    await AuthSession.instance.clearPersistentSession();
+    if (mounted) {
+      setState(() {
+        _isUnlocked = false;
+      });
+    }
   }
 
   void _initTabFromUrl() {
@@ -104,8 +136,10 @@ class _MainNavigationShellState extends State<MainNavigationShell> with WidgetsB
       _currentTabIndex = 6;
     } else if (anchor.contains('vault') || anchor.contains('estate') || anchor.contains('legacy')) {
       _currentTabIndex = 7;
-    } else if (anchor.contains('settings') || anchor.contains('dev')) {
+    } else if (anchor.contains('exchange') || anchor.contains('fx')) {
       _currentTabIndex = 8;
+    } else if (anchor.contains('settings') || anchor.contains('dev')) {
+      _currentTabIndex = 9;
     } else {
       _currentTabIndex = 0;
     }
@@ -131,6 +165,8 @@ class _MainNavigationShellState extends State<MainNavigationShell> with WidgetsB
       } else if (index == 7) {
         setUrlAnchor('vault');
       } else if (index == 8) {
+        setUrlAnchor('exchange-hub');
+      } else if (index == 9) {
         setUrlAnchor('settings');
       }
     });
@@ -138,6 +174,7 @@ class _MainNavigationShellState extends State<MainNavigationShell> with WidgetsB
 
   @override
   void dispose() {
+    CurrencyDisplayState.instance.currencyNotifier.removeListener(_onCurrencyDisplayChanged);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -209,11 +246,14 @@ class _MainNavigationShellState extends State<MainNavigationShell> with WidgetsB
         // Main App Shell or Startup Access Guard Gate
         if (!_isUnlocked)
           AccessGuardScreen(
-            onAuthenticated: () {
-              setState(() {
-                _isUnlocked = true;
-                _isBackgroundMasked = false;
-              });
+            onAuthenticated: () async {
+              await AuthSession.instance.createPersistentSession();
+              if (mounted) {
+                setState(() {
+                  _isUnlocked = true;
+                  _isBackgroundMasked = false;
+                });
+              }
             },
           )
         else
@@ -260,7 +300,7 @@ class _MainNavigationShellState extends State<MainNavigationShell> with WidgetsB
                           onNavigateToGoals: () => _selectTab(5),
                           onNavigateToAutoPilot: () => _selectTab(6),
                           onNavigateToVault: () => _selectTab(7),
-                          onNavigateToSettings: () => _selectTab(8),
+                          onNavigateToSettings: () => _selectTab(9),
                         ),
                         AssetRegistryScreen(
                           onBackToDashboard: () => _selectTab(0),
@@ -271,6 +311,7 @@ class _MainNavigationShellState extends State<MainNavigationShell> with WidgetsB
                         const StrategicInsightsScreen(),
                         const AutoPilotScreen(),
                         const LegacyVaultScreen(),
+                        const ExchangeHubScreen(),
                         const DeveloperSettingsScreen(),
                       ],
                     ),
@@ -285,8 +326,11 @@ class _MainNavigationShellState extends State<MainNavigationShell> with WidgetsB
                           DesktopSidebar(
                             currentTabIndex: _currentTabIndex,
                             selectedCurrency: _selectedCurrency,
-                            onCurrencyChanged: (curr) => setState(() => _selectedCurrency = curr),
-                            onSecretAdminTrigger: () => _selectTab(8),
+                            onCurrencyChanged: (curr) {
+                              CurrencyDisplayState.instance.setDisplayCurrency(curr);
+                            },
+                            onSecretAdminTrigger: () => _selectTab(9),
+                            onLockSession: _lockSession,
                             onTabSelected: _selectTab,
                           ),
                           Expanded(child: mainContent),
@@ -305,7 +349,7 @@ class _MainNavigationShellState extends State<MainNavigationShell> with WidgetsB
                           border: Border(top: BorderSide(color: ZivaTheme.borderCard)),
                         ),
                         child: NavigationBar(
-                          selectedIndex: _currentTabIndex.clamp(0, 8),
+                          selectedIndex: _currentTabIndex.clamp(0, 9),
                           backgroundColor: ZivaTheme.bgSurface,
                           indicatorColor: ZivaTheme.gold500.withValues(alpha: 0.2),
                           onDestinationSelected: _selectTab,
@@ -361,6 +405,11 @@ class _MainNavigationShellState extends State<MainNavigationShell> with WidgetsB
                               icon: Icon(Icons.family_restroom_outlined, color: ZivaTheme.textMuted),
                               selectedIcon: Icon(Icons.family_restroom_rounded, color: ZivaTheme.gold400),
                               label: 'Vault',
+                            ),
+                            const NavigationDestination(
+                              icon: Icon(Icons.currency_exchange_outlined, color: ZivaTheme.textMuted),
+                              selectedIcon: Icon(Icons.currency_exchange_rounded, color: ZivaTheme.gold400),
+                              label: 'FX Hub',
                             ),
                             const NavigationDestination(
                               icon: Icon(Icons.tune_outlined, color: ZivaTheme.textMuted),

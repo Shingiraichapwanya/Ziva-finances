@@ -121,14 +121,22 @@ class DebtModel {
     return (settled / originalPrincipalZar * 100.0).clamp(0.0, 100.0);
   }
 
+  /// Currency code alias for multi-currency uniformity
+  String get currencyCode => currency;
+
   /// Whether debt is fully paid off
   bool get isPaidOff => currentOutstandingBalanceZar <= 0.01 || status == DebtStatus.paidOff;
 
-  /// Whether debt is overdue
+  /// Whether debt is currently overdue
   bool get isOverdue {
     if (isPaidOff) return false;
     if (dueDate == null) return false;
     return DateTime.now().isAfter(dueDate!);
+  }
+
+  /// Total settled amount across all repayments
+  double get totalRepaidZar {
+    return repayments.fold(0.0, (sum, r) => sum + r.amountZar);
   }
 
   String get typeLabel {
@@ -157,6 +165,7 @@ class DebtModel {
     double? originalPrincipalZar,
     double? currentOutstandingBalanceZar,
     String? currency,
+    String? currencyCode,
     double? interestRatePercent,
     double? minimumMonthlyPaymentZar,
     DateTime? dueDate,
@@ -174,7 +183,7 @@ class DebtModel {
       originalPrincipalZar: originalPrincipalZar ?? this.originalPrincipalZar,
       currentOutstandingBalanceZar:
           currentOutstandingBalanceZar ?? this.currentOutstandingBalanceZar,
-      currency: currency ?? this.currency,
+      currency: currencyCode ?? currency ?? this.currency,
       interestRatePercent: interestRatePercent ?? this.interestRatePercent,
       minimumMonthlyPaymentZar:
           minimumMonthlyPaymentZar ?? this.minimumMonthlyPaymentZar,
@@ -197,6 +206,7 @@ class DebtModel {
         'original_principal_zar': originalPrincipalZar,
         'current_outstanding_balance_zar': currentOutstandingBalanceZar,
         'currency': currency,
+        'currency_code': currency,
         'interest_rate_percent': interestRatePercent,
         'minimum_monthly_payment_zar': minimumMonthlyPaymentZar,
         'due_date': dueDate?.toIso8601String(),
@@ -224,7 +234,7 @@ class DebtModel {
             (json['original_principal_zar'] as num?)?.toDouble() ?? 0.0,
         currentOutstandingBalanceZar:
             (json['current_outstanding_balance_zar'] as num?)?.toDouble() ?? 0.0,
-        currency: json['currency'] as String? ?? 'ZAR',
+        currency: (json['currency_code'] ?? json['currency'] ?? 'ZAR').toString(),
         interestRatePercent: (json['interest_rate_percent'] as num?)?.toDouble(),
         minimumMonthlyPaymentZar:
             (json['minimum_monthly_payment_zar'] as num?)?.toDouble(),

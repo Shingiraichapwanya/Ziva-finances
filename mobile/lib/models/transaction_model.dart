@@ -19,6 +19,11 @@ class TransactionModel {
   final bool isSynced; // Local SQLite tracking flag
   final String? receiptName;
   final String? receiptUrl;
+  final String? receiptFileType; // 'pdf' | 'image' | null
+
+  // Multi-Currency & Audit References (Backward-Compatible Aliases)
+  String get currencyCode => originalCurrency;
+  String? get receiptStorageUrl => receiptUrl;
 
   TransactionModel({
     required this.transactionId,
@@ -39,6 +44,7 @@ class TransactionModel {
     this.isSynced = true,
     this.receiptName,
     this.receiptUrl,
+    this.receiptFileType,
   });
 
   bool get hasReceipt =>
@@ -81,7 +87,11 @@ class TransactionModel {
     }
 
     final String? rName = (json['receiptName'] ?? json['receipt_name'])?.toString();
-    final String? rUrl = (json['receiptUrl'] ?? json['receipt_url'])?.toString();
+    final String? rUrl = (json['receiptUrl'] ?? json['receipt_url'] ?? json['receiptStorageUrl'] ?? json['receipt_storage_url'])?.toString();
+    final String? rFileType = (json['receiptFileType'] ?? json['receipt_file_type'])?.toString();
+    final String rawCurrency = (json['currency_code'] ?? json['currencyCode'] ?? json['originalCurrency'] ?? json['original_currency'] ?? 'ZAR').toString();
+    // Normalize 'ZiG' to 'ZWG'
+    final String effectiveCurrency = rawCurrency.toUpperCase() == 'ZIG' ? 'ZWG' : rawCurrency.toUpperCase();
 
     return TransactionModel(
       transactionId: (json['transactionId'] ?? json['transaction_id'] ?? '').toString(),
@@ -91,7 +101,7 @@ class TransactionModel {
       categoryName: (json['categoryName'] ?? json['category_name'] ?? 'General').toString(),
       transactionType: (json['transactionType'] ?? json['transaction_type'] ?? 'EXPENSE').toString(),
       originalAmount: origAmount,
-      originalCurrency: (json['originalCurrency'] ?? json['original_currency'] ?? 'ZAR').toString(),
+      originalCurrency: effectiveCurrency,
       reportingAmountZar: zarAmount,
       reportingAmountUsd: usdAmount,
       merchantOrPayee: (json['merchantOrPayee'] ?? json['merchant_or_payee'] ?? 'Direct Entry').toString(),
@@ -102,6 +112,7 @@ class TransactionModel {
       isSynced: json['is_synced'] == null ? true : (json['is_synced'] == 1 || json['is_synced'] == true),
       receiptName: rName,
       receiptUrl: rUrl,
+      receiptFileType: rFileType,
     );
   }
 
@@ -115,6 +126,8 @@ class TransactionModel {
       'transactionType': transactionType,
       'originalAmount': originalAmount,
       'originalCurrency': originalCurrency,
+      'currency_code': originalCurrency,
+      'currencyCode': originalCurrency,
       'reportingAmountZar': reportingAmountZar,
       'reportingAmountUsd': reportingAmountUsd,
       'merchantOrPayee': merchantOrPayee,
@@ -124,6 +137,10 @@ class TransactionModel {
       'tags': tags,
       'receiptName': receiptName,
       'receiptUrl': receiptUrl,
+      'receipt_storage_url': receiptUrl,
+      'receiptStorageUrl': receiptUrl,
+      'receipt_file_type': receiptFileType,
+      'receiptFileType': receiptFileType,
     };
   }
 
@@ -137,6 +154,7 @@ class TransactionModel {
       'transaction_type': transactionType,
       'original_amount': originalAmount,
       'original_currency': originalCurrency,
+      'currency_code': originalCurrency,
       'reporting_amount_zar': reportingAmountZar,
       'reporting_amount_usd': reportingAmountUsd,
       'merchant_or_payee': merchantOrPayee,
@@ -147,6 +165,8 @@ class TransactionModel {
       'is_synced': isSynced ? 1 : 0,
       'receipt_name': receiptName,
       'receipt_url': receiptUrl,
+      'receipt_storage_url': receiptUrl,
+      'receipt_file_type': receiptFileType,
     };
   }
 
@@ -159,6 +179,7 @@ class TransactionModel {
     String? transactionType,
     double? originalAmount,
     String? originalCurrency,
+    String? currencyCode,
     double? reportingAmountZar,
     double? reportingAmountUsd,
     String? merchantOrPayee,
@@ -169,6 +190,8 @@ class TransactionModel {
     bool? isSynced,
     String? receiptName,
     String? receiptUrl,
+    String? receiptStorageUrl,
+    String? receiptFileType,
   }) {
     return TransactionModel(
       transactionId: transactionId ?? this.transactionId,
@@ -178,7 +201,7 @@ class TransactionModel {
       categoryName: categoryName ?? this.categoryName,
       transactionType: transactionType ?? this.transactionType,
       originalAmount: originalAmount ?? this.originalAmount,
-      originalCurrency: originalCurrency ?? this.originalCurrency,
+      originalCurrency: currencyCode ?? originalCurrency ?? this.originalCurrency,
       reportingAmountZar: reportingAmountZar ?? this.reportingAmountZar,
       reportingAmountUsd: reportingAmountUsd ?? this.reportingAmountUsd,
       merchantOrPayee: merchantOrPayee ?? this.merchantOrPayee,
@@ -188,7 +211,9 @@ class TransactionModel {
       tags: tags ?? this.tags,
       isSynced: isSynced ?? this.isSynced,
       receiptName: receiptName ?? this.receiptName,
-      receiptUrl: receiptUrl ?? this.receiptUrl,
+      receiptUrl: receiptStorageUrl ?? receiptUrl ?? this.receiptUrl,
+      receiptFileType: receiptFileType ?? this.receiptFileType,
     );
   }
 }
+

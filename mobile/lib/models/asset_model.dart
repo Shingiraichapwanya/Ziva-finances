@@ -56,6 +56,7 @@ class AssetModel {
   final double linkedLiabilityAmountZar;
   final String notes;
   final bool includeInNetWorth;
+  final String currencyCode;
   final DateTime createdAt;
   final DateTime updatedAt;
 
@@ -81,6 +82,7 @@ class AssetModel {
     this.linkedLiabilityAmountZar = 0.0,
     this.notes = '',
     this.includeInNetWorth = true,
+    this.currencyCode = 'ZAR',
     required this.createdAt,
     required this.updatedAt,
   });
@@ -180,6 +182,7 @@ class AssetModel {
     double? linkedLiabilityAmountZar,
     String? notes,
     bool? includeInNetWorth,
+    String? currencyCode,
   }) {
     return AssetModel(
       id: id,
@@ -205,6 +208,7 @@ class AssetModel {
           linkedLiabilityAmountZar ?? this.linkedLiabilityAmountZar,
       notes: notes ?? this.notes,
       includeInNetWorth: includeInNetWorth ?? this.includeInNetWorth,
+      currencyCode: currencyCode ?? this.currencyCode,
       createdAt: createdAt,
       updatedAt: DateTime.now(),
     );
@@ -233,6 +237,7 @@ class AssetModel {
       'linked_liability_amount_zar': linkedLiabilityAmountZar,
       'notes': notes,
       'include_in_net_worth': includeInNetWorth ? 1 : 0,
+      'currency_code': currencyCode,
       'created_at': createdAt.toIso8601String(),
       'updated_at': updatedAt.toIso8601String(),
     };
@@ -281,6 +286,7 @@ class AssetModel {
       includeInNetWorth: json['include_in_net_worth'] == 1 ||
           json['include_in_net_worth'] == true ||
           json['include_in_net_worth'] == null,
+      currencyCode: (json['currency_code'] ?? json['currencyCode'] ?? 'ZAR').toString(),
       createdAt: json['created_at'] != null
           ? DateTime.tryParse(json['created_at'].toString()) ?? DateTime.now()
           : DateTime.now(),
@@ -290,3 +296,4 @@ class AssetModel {
     );
   }
 }
+

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../core/config/app_environment.dart';
 import '../../core/theme/ziva_theme.dart';
+import '../../services/auth_session.dart';
 import '../../services/biometric_service.dart';
 
 /// AccessGuardScreen - Executive PIN & Biometric Passcode Gate
@@ -82,6 +83,7 @@ class _AccessGuardScreenState extends State<AccessGuardScreen> with SingleTicker
   void _verifyEnteredPin(String pin) {
     if (pin == _masterPin) {
       HapticFeedback.mediumImpact();
+      AuthSession.instance.createPersistentSession();
       widget.onAuthenticated();
     } else {
       HapticFeedback.heavyImpact();
@@ -97,6 +99,7 @@ class _AccessGuardScreenState extends State<AccessGuardScreen> with SingleTicker
   Future<void> _attemptBiometricUnlock() async {
     if (kIsWeb) {
       // Biometrics on web automatically bypasses in staging/demo
+      await AuthSession.instance.createPersistentSession();
       widget.onAuthenticated();
       return;
     }
@@ -108,6 +111,7 @@ class _AccessGuardScreenState extends State<AccessGuardScreen> with SingleTicker
     if (mounted) {
       setState(() => _isAuthenticatingBiometrics = false);
       if (success) {
+        await AuthSession.instance.createPersistentSession();
         widget.onAuthenticated();
       } else {
         setState(() {

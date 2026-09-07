@@ -2,11 +2,14 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import '../../core/currency/currency_display_state.dart';
+import '../../core/currency/currency_types.dart';
 import '../../core/theme/ziva_theme.dart';
 import '../../core/utils/currency_formatter.dart';
 import '../../core/utils/transaction_parser.dart';
 import '../../core/utils/web_file_uploader.dart';
 import '../../models/transaction_model.dart';
+import '../../services/receipt_storage_service.dart';
 import '../../services/sqlite_service.dart';
 import '../../services/sync_engine.dart';
 
@@ -26,7 +29,7 @@ class _QuickEntryBottomSheetState extends State<QuickEntryBottomSheet> {
   final _notesController = TextEditingController();
   final _nlpController = TextEditingController();
 
-  String _selectedCurrency = 'ZAR';
+  String _selectedCurrency = CurrencyDisplayState.instance.currentDisplayCurrency;
   String _selectedAccountId = 'ACC_ZA_CAPITEC_DAILY';
   String _selectedCategoryId = 'CAT_GROCERIES';
   String _selectedCategoryName = 'Groceries & Household';
@@ -44,7 +47,7 @@ class _QuickEntryBottomSheetState extends State<QuickEntryBottomSheet> {
     {'id': 'ACC_ZA_CAPITEC_DAILY', 'name': 'Capitec Daily Cheque (ZAR)'},
     {'id': 'ACC_ZA_FNB_MONTHLY', 'name': 'FNB Commercial Monthly (ZAR)'},
     {'id': 'ACC_ZW_ECOCASH_USD', 'name': 'EcoCash USD Wallet (USD)'},
-    {'id': 'ACC_ZW_ECOCASH_ZIG', 'name': 'EcoCash ZiG Wallet (ZiG)'},
+    {'id': 'ACC_ZW_ECOCASH_ZIG', 'name': 'EcoCash ZWG Wallet (ZWG)'},
     {'id': 'ACC_ZA_DISCOVERY_VAULT', 'name': 'Discovery 32-Day Notice (ZAR)'},
   ];
 
@@ -62,6 +65,7 @@ class _QuickEntryBottomSheetState extends State<QuickEntryBottomSheet> {
   @override
   void initState() {
     super.initState();
+    _autoMatchAccount(_selectedCurrency);
     _loadEnvelopesAsCategories();
     if (kIsWeb) {
       registerDragDropListener(
@@ -104,9 +108,10 @@ class _QuickEntryBottomSheetState extends State<QuickEntryBottomSheet> {
 
   /// Automatically matches an appropriate default account when currency changes
   void _autoMatchAccount(String currency) {
-    if (currency == 'USD') {
+    final clean = getEffectiveCurrencyCode(currency);
+    if (clean == 'USD') {
       _selectedAccountId = 'ACC_ZW_ECOCASH_USD';
-    } else if (currency == 'ZiG') {
+    } else if (clean == 'ZWG') {
       _selectedAccountId = 'ACC_ZW_ECOCASH_ZIG';
     } else {
       _selectedAccountId = 'ACC_ZA_CAPITEC_DAILY';
@@ -258,9 +263,12 @@ class _QuickEntryBottomSheetState extends State<QuickEntryBottomSheet> {
       toCurrency: 'USD',
     );
 
-    final String? rName = _scannedFile?.name;
-    final String? rUrl = _scannedFile != null
-        ? 'https://storage.googleapis.com/budget-tracker-507418-receipts/tax_2026/${txId}_${_scannedFile!.name}'
+    final receiptRef = _scannedFile != null
+        ? ReceiptStorageService.instance.saveReceiptReference(
+            transactionId: txId,
+            filename: _scannedFile!.name,
+            mimeType: _scannedFile!.mimeType,
+          )
         : null;
 
     final newTx = TransactionModel(
@@ -284,8 +292,9 @@ class _QuickEntryBottomSheetState extends State<QuickEntryBottomSheet> {
         if (_isTaxDeductible) 'tax_deductible',
       ],
       isSynced: false,
-      receiptName: rName,
-      receiptUrl: rUrl,
+      receiptName: receiptRef?.fileName,
+      receiptUrl: receiptRef?.storageUrl,
+      receiptFileType: receiptRef?.fileType,
     );
 
     // 1. OPTIMISTIC UI: Notify dashboard immediately and dismiss modal with 0ms lag
@@ -459,7 +468,7 @@ class _QuickEntryBottomSheetState extends State<QuickEntryBottomSheet> {
                         initialValue: _selectedCurrency,
                         decoration: const InputDecoration(labelText: 'Currency'),
                         dropdownColor: ZivaTheme.bgCard,
-                        items: ['ZAR', 'USD', 'ZiG'].map((c) {
+                        items: supportedCurrencies.map((c) {
                           return DropdownMenuItem(
                             value: c,
                             child: Text(c, style: const TextStyle(fontWeight: FontWeight.w700)),

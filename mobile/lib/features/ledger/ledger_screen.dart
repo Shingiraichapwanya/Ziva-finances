@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import '../../core/currency/currency_display_state.dart';
+import '../../core/currency/currency_types.dart';
 import '../../core/theme/ziva_theme.dart';
 import '../../core/utils/currency_formatter.dart';
 import '../../models/debt_model.dart';
@@ -8,6 +10,7 @@ import '../../models/transaction_model.dart';
 import '../../services/sqlite_service.dart';
 import '../../services/sync_engine.dart';
 import '../../services/tax_export_service.dart';
+import '../../services/tax_report_generator.dart';
 import 'quick_entry_sheet.dart';
 import 'receipt_viewer_sheet.dart';
 
@@ -142,6 +145,190 @@ class _LedgerScreenState extends State<LedgerScreen> with SingleTickerProviderSt
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  void _openTaxReportDialog() {
+    DateTime startDate = DateTime(DateTime.now().year, 1, 1);
+    DateTime endDate = DateTime.now();
+    String displayCurrency = CurrencyDisplayState.instance.currentDisplayCurrency;
+
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          final count = _transactions.where((t) => t.isTaxDeductible).length;
+
+          return AlertDialog(
+            backgroundColor: ZivaTheme.bgSurface,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+              side: const BorderSide(color: ZivaTheme.borderCard),
+            ),
+            title: Row(
+              children: [
+                Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    color: ZivaTheme.gold500.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: ZivaTheme.gold500.withValues(alpha: 0.3)),
+                  ),
+                  child: const Icon(Icons.picture_as_pdf_rounded, color: ZivaTheme.gold400, size: 18),
+                ),
+                const SizedBox(width: 10),
+                const Expanded(
+                  child: Text(
+                    'Tax Deductible PDF Report',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: ZivaTheme.textPrimary),
+                  ),
+                ),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Generate a consolidated, audit-ready PDF document for ZIMRA / SARS containing an executive summary, multi-currency breakdown, and itemized vouchers with receipt references.',
+                  style: TextStyle(fontSize: 12, color: ZivaTheme.textMuted),
+                ),
+                const SizedBox(height: 16),
+
+                // Reporting Currency
+                const Text('REPORTING DISPLAY CURRENCY', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: ZivaTheme.textMuted)),
+                const SizedBox(height: 6),
+                DropdownButtonFormField<String>(
+                  key: ValueKey(displayCurrency),
+                  initialValue: displayCurrency,
+                  decoration: const InputDecoration(border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8)),
+                  dropdownColor: ZivaTheme.bgCard,
+                  items: supportedCurrencies.map((c) {
+                    return DropdownMenuItem(value: c, child: Text(getCurrencyLabel(c), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)));
+                  }).toList(),
+                  onChanged: (val) {
+                    if (val != null) setDialogState(() => displayCurrency = val);
+                  },
+                ),
+
+                const SizedBox(height: 14),
+
+                // Date Range Indicator
+                const Text('AUDIT PERIOD', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: ZivaTheme.textMuted)),
+                const SizedBox(height: 6),
+                InkWell(
+                  onTap: () async {
+                    final picked = await showDateRangePicker(
+                      context: context,
+                      firstDate: DateTime(2020),
+                      lastDate: DateTime(2030),
+                      initialDateRange: DateTimeRange(start: startDate, end: endDate),
+                      builder: (context, child) {
+                        return Theme(
+                          data: Theme.of(context).copyWith(
+                            colorScheme: const ColorScheme.dark(
+                              primary: ZivaTheme.gold500,
+                              onPrimary: Colors.black,
+                              surface: ZivaTheme.bgSurface,
+                              onSurface: ZivaTheme.textPrimary,
+                            ),
+                          ),
+                          child: child!,
+                        );
+                      },
+                    );
+                    if (picked != null) {
+                      setDialogState(() {
+                        startDate = picked.start;
+                        endDate = picked.end;
+                      });
+                    }
+                  },
+                  borderRadius: BorderRadius.circular(8),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: ZivaTheme.bgCore,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: ZivaTheme.borderCard),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(Icons.date_range_rounded, size: 16, color: ZivaTheme.gold400),
+                            const SizedBox(width: 8),
+                            Text(
+                              '${DateFormat('yyyy-MM-dd').format(startDate)} → ${DateFormat('yyyy-MM-dd').format(endDate)}',
+                              style: const TextStyle(fontSize: 12, fontFamily: 'monospace', color: ZivaTheme.textPrimary),
+                            ),
+                          ],
+                        ),
+                        const Icon(Icons.edit_calendar_rounded, size: 14, color: ZivaTheme.textMuted),
+                      ],
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 12),
+                Text(
+                  'Identified $count eligible tax-deductible entries in local ledger.',
+                  style: const TextStyle(fontSize: 11, color: ZivaTheme.gold300),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancel', style: TextStyle(color: ZivaTheme.textMuted)),
+              ),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.download_rounded, size: 16),
+                label: const Text('Generate PDF', style: TextStyle(fontWeight: FontWeight.bold)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: ZivaTheme.gold500,
+                  foregroundColor: Colors.black,
+                ),
+                onPressed: () async {
+                  Navigator.pop(ctx);
+                  await TaxReportGenerator.instance.generateAndDownloadReport(
+                    transactions: _transactions,
+                    displayCurrency: displayCurrency,
+                    startDate: startDate,
+                    endDate: endDate,
+                  );
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        backgroundColor: ZivaTheme.bgSurface,
+                        behavior: SnackBarBehavior.floating,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          side: const BorderSide(color: ZivaTheme.gold400),
+                        ),
+                        content: Row(
+                          children: [
+                            const Icon(Icons.picture_as_pdf_rounded, color: ZivaTheme.gold400, size: 20),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                'Consolidated Tax Deductible PDF Report generated ($displayCurrency)',
+                                style: const TextStyle(color: ZivaTheme.textPrimary, fontSize: 12, fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  }
+                },
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -516,6 +703,11 @@ class _LedgerScreenState extends State<LedgerScreen> with SingleTickerProviderSt
         ),
         actions: [
           IconButton(
+            icon: const Icon(Icons.picture_as_pdf_rounded, color: ZivaTheme.gold400),
+            tooltip: 'Generate Consolidated Tax Deductible Report (PDF)',
+            onPressed: _openTaxReportDialog,
+          ),
+          IconButton(
             icon: const Icon(Icons.description_outlined, color: ZivaTheme.gold400),
             tooltip: 'Download SARS Tax Audit Report (CSV & Receipts)',
             onPressed: _exportTaxReport,
@@ -648,12 +840,23 @@ class _LedgerScreenState extends State<LedgerScreen> with SingleTickerProviderSt
                 ),
                 const SizedBox(width: 6),
                 ElevatedButton.icon(
-                  onPressed: _exportTaxReport,
-                  icon: const Icon(Icons.download_rounded, size: 14),
-                  label: const Text('Export Tax Report', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                  onPressed: _openTaxReportDialog,
+                  icon: const Icon(Icons.picture_as_pdf_rounded, size: 14),
+                  label: const Text('Consolidated PDF', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: ZivaTheme.gold500,
                     foregroundColor: Colors.black,
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                OutlinedButton.icon(
+                  onPressed: _exportTaxReport,
+                  icon: const Icon(Icons.download_rounded, size: 14, color: ZivaTheme.gold400),
+                  label: const Text('Export CSV', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: ZivaTheme.textPrimary)),
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: ZivaTheme.borderCard),
                     visualDensity: VisualDensity.compact,
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                   ),

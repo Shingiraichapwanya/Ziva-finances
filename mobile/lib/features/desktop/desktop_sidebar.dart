@@ -10,6 +10,7 @@ class DesktopSidebar extends StatelessWidget {
   final String selectedCurrency;
   final ValueChanged<String> onCurrencyChanged;
   final VoidCallback? onSecretAdminTrigger;
+  final VoidCallback? onLockSession;
 
   const DesktopSidebar({
     super.key,
@@ -18,6 +19,7 @@ class DesktopSidebar extends StatelessWidget {
     this.selectedCurrency = 'ZAR',
     required this.onCurrencyChanged,
     this.onSecretAdminTrigger,
+    this.onLockSession,
   });
 
   @override
@@ -133,8 +135,9 @@ class DesktopSidebar extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
                 Row(
-                  children: ['ZAR', 'USD', 'ZiG'].map((curr) {
-                    final isSelected = selectedCurrency == curr;
+                  children: ['USD', 'ZWG', 'ZAR'].map((curr) {
+                    final normalizedSelected = selectedCurrency == 'ZiG' ? 'ZWG' : selectedCurrency;
+                    final isSelected = normalizedSelected == curr;
                     return Expanded(
                       child: GestureDetector(
                         onTap: () => onCurrencyChanged(curr),
@@ -273,16 +276,37 @@ class DesktopSidebar extends StatelessWidget {
                     },
                   ),
 
-                  // 9. SYSTEM SETTINGS & PROOF OF DEPLOYMENT
+                  // 9. EXCHANGE HUB (MULTI-CURRENCY & FX TRENDS)
                   _buildSidebarNavButton(
-                    icon: Icons.tune_rounded,
-                    label: 'System Settings & OTA',
+                    icon: Icons.currency_exchange_rounded,
+                    label: 'Exchange Hub',
+                    badge: 'FX',
                     isActive: currentTabIndex == 8,
                     onTap: () {
-                      setUrlAnchor('#settings');
+                      setUrlAnchor('#exchange-hub');
                       onTabSelected(8);
                     },
                   ),
+
+                  // 10. SYSTEM SETTINGS & PROOF OF DEPLOYMENT
+                  _buildSidebarNavButton(
+                    icon: Icons.tune_rounded,
+                    label: 'System Settings & OTA',
+                    isActive: currentTabIndex == 9,
+                    onTap: () {
+                      setUrlAnchor('#settings');
+                      onTabSelected(9);
+                    },
+                  ),
+
+                  // 11. LOCK PERSISTENT SESSION (OPTIONAL TRIGGER)
+                  if (onLockSession != null)
+                    _buildSidebarNavButton(
+                      icon: Icons.lock_outline_rounded,
+                      label: 'Lock Session',
+                      isActive: false,
+                      onTap: onLockSession!,
+                    ),
                 ],
               ),
             ),
