@@ -24,6 +24,10 @@ class CurrencyFormatter {
     return formatAmount(amount, currency: currency);
   }
 
+  static String formatZar(double amount) {
+    return formatAmount(amount, currency: 'ZAR');
+  }
+
   // Cross currency conversion using effective standard rates
   static double convert({
     required double amount,

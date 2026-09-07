@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import '../../core/theme/ziva_theme.dart';
 import '../../models/asset_model.dart';
 import '../../models/debt_model.dart';
+import '../../models/email_transaction_proposal.dart';
 import '../../models/envelope_model.dart';
+import '../../models/legacy_vault_model.dart';
 import '../../models/scenario_model.dart';
 import '../../models/strategic_goal_model.dart';
 import '../../models/transaction_model.dart';
@@ -35,6 +37,8 @@ class _GlobalSearchDialogState extends State<GlobalSearchDialog> {
   List<AssetModel> _allAssets = [];
   List<ScenarioModel> _allScenarios = [];
   List<StrategicGoalModel> _allGoals = [];
+  List<EmailTransactionProposal> _allProposals = [];
+  List<TrustedContact> _allContacts = [];
 
   bool _isLoading = true;
   String _query = '';
@@ -62,6 +66,8 @@ class _GlobalSearchDialogState extends State<GlobalSearchDialog> {
     final assets = await SqliteService.instance.getAssets();
     final scenarios = SqliteService.instance.getScenarios();
     final goals = SqliteService.instance.getStrategicGoals();
+    final proposals = SqliteService.instance.getEmailProposals();
+    final contacts = SqliteService.instance.getTrustedContacts();
 
     if (mounted) {
       setState(() {
@@ -71,6 +77,8 @@ class _GlobalSearchDialogState extends State<GlobalSearchDialog> {
         _allAssets = assets;
         _allScenarios = scenarios;
         _allGoals = goals;
+        _allProposals = proposals;
+        _allContacts = contacts;
         _isLoading = false;
       });
     }
@@ -109,7 +117,23 @@ class _GlobalSearchDialogState extends State<GlobalSearchDialog> {
         : _allGoals.where((g) {
             return g.title.toLowerCase().contains(q) ||
                 g.rawInputPrompt.toLowerCase().contains(q) ||
-                g.intent.name.toLowerCase().contains(q);
+                g.recommendation.statusNudge.toLowerCase().contains(q);
+          }).take(4).toList();
+
+    final matchedProposals = q.isEmpty
+        ? <EmailTransactionProposal>[]
+        : _allProposals.where((p) {
+            return p.counterparty.toLowerCase().contains(q) ||
+                p.emailSubject.toLowerCase().contains(q) ||
+                p.referenceNumber.toLowerCase().contains(q);
+          }).take(4).toList();
+
+    final matchedContacts = q.isEmpty
+        ? <TrustedContact>[]
+        : _allContacts.where((c) {
+            return c.fullName.toLowerCase().contains(q) ||
+                c.relationship.toLowerCase().contains(q) ||
+                c.email.toLowerCase().contains(q);
           }).take(4).toList();
 
     final matchedEnvelopes = q.isEmpty
@@ -132,6 +156,8 @@ class _GlobalSearchDialogState extends State<GlobalSearchDialog> {
         matchedDebts.length +
         matchedScenarios.length +
         matchedGoals.length +
+        matchedProposals.length +
+        matchedContacts.length +
         matchedEnvelopes.length +
         matchedTransactions.length;
 
@@ -235,6 +261,16 @@ class _GlobalSearchDialogState extends State<GlobalSearchDialog> {
                                 if (matchedGoals.isNotEmpty) ...[
                                   _buildSectionHeader('STRATEGIC GOALS (PERSONAL CFO)', Icons.psychology_rounded, Colors.tealAccent),
                                   ...matchedGoals.map((g) => _buildGoalResultItem(g)),
+                                  const SizedBox(height: 12),
+                                ],
+                                if (matchedProposals.isNotEmpty) ...[
+                                  _buildSectionHeader('AUTO PILOT INGESTION QUEUE', Icons.auto_mode_rounded, ZivaTheme.gold400),
+                                  ...matchedProposals.map((p) => _buildProposalResultItem(p)),
+                                  const SizedBox(height: 12),
+                                ],
+                                if (matchedContacts.isNotEmpty) ...[
+                                  _buildSectionHeader('ESTATE VAULT TRUSTED CONTACTS', Icons.family_restroom_rounded, ZivaTheme.cyan400),
+                                  ...matchedContacts.map((c) => _buildContactResultItem(c)),
                                   const SizedBox(height: 12),
                                 ],
                                 if (matchedEnvelopes.isNotEmpty) ...[
@@ -485,6 +521,98 @@ class _GlobalSearchDialogState extends State<GlobalSearchDialog> {
             Text(
               'R ${goal.targetAmountZar.toStringAsFixed(0)}',
               style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.tealAccent, fontFamily: 'monospace'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildProposalResultItem(EmailTransactionProposal proposal) {
+    return InkWell(
+      onTap: () {
+        Navigator.pop(context);
+        widget.onNavigateToTab?.call(6); // Tab 6 is Auto Pilot
+      },
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: ZivaTheme.bgCard,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: ZivaTheme.borderCard),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: ZivaTheme.gold400.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: const Icon(Icons.auto_awesome_rounded, size: 14, color: ZivaTheme.gold400),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(proposal.counterparty, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: ZivaTheme.textPrimary)),
+                  Text('${proposal.documentType.name.toUpperCase()} • ${(proposal.confidenceScore * 100).toStringAsFixed(0)}% Confidence',
+                      style: const TextStyle(fontSize: 11, color: ZivaTheme.textMuted)),
+                ],
+              ),
+            ),
+            Text(
+              'R ${proposal.extractedAmount.toStringAsFixed(2)}',
+              style: const TextStyle(fontWeight: FontWeight.bold, color: ZivaTheme.gold400, fontFamily: 'monospace'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildContactResultItem(TrustedContact contact) {
+    return InkWell(
+      onTap: () {
+        Navigator.pop(context);
+        widget.onNavigateToTab?.call(7); // Tab 7 is Legacy Vault
+      },
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: ZivaTheme.bgCard,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: ZivaTheme.borderCard),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: ZivaTheme.cyan400.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: const Icon(Icons.shield_rounded, size: 14, color: ZivaTheme.cyan400),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(contact.fullName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: ZivaTheme.textPrimary)),
+                  Text('${contact.relationship} • ${contact.accessLevel.name.toUpperCase()}',
+                      style: const TextStyle(fontSize: 11, color: ZivaTheme.textMuted)),
+                ],
+              ),
+            ),
+            Text(
+              contact.email,
+              style: const TextStyle(fontSize: 11, color: ZivaTheme.textMuted),
             ),
           ],
         ),

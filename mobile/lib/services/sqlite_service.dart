@@ -6,7 +6,14 @@ import 'package:uuid/uuid.dart';
 import '../models/account_model.dart';
 import '../models/asset_model.dart';
 import '../models/debt_model.dart';
+import '../models/bank_sync_model.dart';
+import '../models/confidence_rule_model.dart';
+import '../models/deposit_slip_model.dart';
+import '../models/email_transaction_proposal.dart';
 import '../models/envelope_model.dart';
+import '../models/legacy_vault_model.dart';
+import '../models/predictive_cashflow_model.dart';
+import '../models/reconciliation_model.dart';
 import '../models/scenario_model.dart';
 import '../models/strategic_goal_model.dart';
 import '../models/sync_queue_item.dart';
@@ -32,6 +39,20 @@ class SqliteService {
   TaxAutomationConfig _taxConfig = const TaxAutomationConfig();
   final List<TaxSkimRecord> _mockTaxSkims = [];
   final List<StrategicGoalModel> _mockStrategicGoals = [];
+
+  // Phase Four: Auto Pilot Intelligence collections
+  final List<EmailTransactionProposal> _mockEmailProposals = [];
+  GoogleWorkspaceConnection _workspaceConnection = const GoogleWorkspaceConnection();
+  final List<DepositSlipModel> _mockDepositSlips = [];
+  final List<StatementTransaction> _mockStatementTransactions = [];
+  final List<ReconciliationMatch> _mockReconciliationMatches = [];
+  ConfidenceEngineConfig _confidenceConfig = const ConfidenceEngineConfig();
+  final List<AutoAddAuditRecord> _mockAutoAddAuditLogs = [];
+  final List<KnownObligation> _mockObligations = [];
+  final List<BankSyncConnection> _mockBankSyncConnections = [];
+  LegacyVaultConfig _legacyVaultConfig = const LegacyVaultConfig();
+  final List<TrustedContact> _mockTrustedContacts = [];
+  final List<VaultAuditLog> _mockVaultAuditLogs = [];
 
   static final List<AssetModel> defaultAssets = [
     AssetModel(
@@ -557,6 +578,493 @@ class SqliteService {
     ),
   ];
 
+  static final List<EmailTransactionProposal> defaultEmailProposals = [
+    EmailTransactionProposal(
+      id: 'PROP_EMAIL_01',
+      emailSubject: 'FNB Payment Confirmation: Retainer Deposit',
+      senderEmail: 'notifications@fnb.co.za',
+      receivedDate: DateTime(2026, 9, 5, 14, 30),
+      documentType: EmailDocumentType.paymentNotification,
+      extractedAmount: 45000.0,
+      currency: 'ZAR',
+      counterparty: 'Apex Global Advisory',
+      referenceNumber: 'REF-APEX-ADV-992',
+      accountIdentifier: 'FNB •••• 4921',
+      suggestedEnvelopeId: 'CAT_ESSENTIAL_SAVINGS',
+      suggestedAccountId: 'ACC_FNB_01',
+      isCredit: true,
+      confidenceScore: 0.98,
+      confidenceFactors: {
+        'Sender Authenticity (DKIM/SPF)': 1.0,
+        'Structured Swift Reference': 0.98,
+        'Known Counterparty Pattern': 0.96,
+      },
+      status: ProposalStatus.autoAdded,
+      rawSnippet: 'Dear Customer, your account *4921 has been credited with ZAR 45,000.00 from APEX GLOBAL ADVISORY on 05-Sep-2026. Ref: REF-APEX-ADV-992.',
+      reviewedAt: DateTime(2026, 9, 5, 14, 31),
+      createdTransactionId: 'TX_AUTO_APEX_01',
+    ),
+    EmailTransactionProposal(
+      id: 'PROP_EMAIL_02',
+      emailSubject: 'Invoice INV-2026-881 from AWS Cloud EMEA',
+      senderEmail: 'no-reply-aws@amazon.com',
+      receivedDate: DateTime(2026, 9, 4, 9, 15),
+      documentType: EmailDocumentType.invoice,
+      extractedAmount: 12450.0,
+      currency: 'ZAR',
+      counterparty: 'Amazon Web Services EMEA',
+      referenceNumber: 'INV-AWS-2026-881',
+      accountIdentifier: 'Standard Bank •••• 8820',
+      suggestedEnvelopeId: 'CAT_TECH_CLOUD',
+      suggestedAccountId: 'ACC_STDBANK_01',
+      isCredit: false,
+      confidenceScore: 0.96,
+      confidenceFactors: {
+        'Corporate PDF Attachment': 0.98,
+        'Matched Tax Invoice VAT': 0.95,
+        'Regular Monthly Run-Rate': 0.95,
+      },
+      status: ProposalStatus.autoAdded,
+      rawSnippet: 'Tax Invoice INV-AWS-2026-881: South Africa Region instances, Bandwidth & S3 storage. Amount: ZAR 12,450.00 charged to card ending in 8820.',
+      reviewedAt: DateTime(2026, 9, 4, 9, 16),
+      createdTransactionId: 'TX_AUTO_AWS_01',
+    ),
+    EmailTransactionProposal(
+      id: 'PROP_EMAIL_03',
+      emailSubject: 'Apple Services Monthly Subscription Receipt',
+      senderEmail: 'no_reply@email.apple.com',
+      receivedDate: DateTime(2026, 9, 6, 8, 12),
+      documentType: EmailDocumentType.receipt,
+      extractedAmount: 1899.0,
+      currency: 'ZAR',
+      counterparty: 'Apple Distribution International',
+      referenceNumber: 'APL-ZA-89104',
+      accountIdentifier: 'FNB •••• 4921',
+      suggestedEnvelopeId: 'CAT_TECH_CLOUD',
+      suggestedAccountId: 'ACC_FNB_01',
+      isCredit: false,
+      confidenceScore: 0.88,
+      confidenceFactors: {
+        'Verified Apple Sender': 0.95,
+        'Uncertain Envelope Split (iCloud vs App)': 0.80,
+      },
+      status: ProposalStatus.pending,
+      rawSnippet: 'Your receipt from Apple for iCloud+ 2TB and Apple One Premier. Total billed: R1,899.00 on Visa card ending in 4921.',
+    ),
+    EmailTransactionProposal(
+      id: 'PROP_EMAIL_04',
+      emailSubject: 'Woolworths Food & Cellar Order Confirmation #W-99120',
+      senderEmail: 'orders@woolworths.co.za',
+      receivedDate: DateTime(2026, 9, 7, 11, 45),
+      documentType: EmailDocumentType.receipt,
+      extractedAmount: 3420.0,
+      currency: 'ZAR',
+      counterparty: 'Woolworths Camps Bay',
+      referenceNumber: 'WOOL-99120',
+      accountIdentifier: 'FNB •••• 4921',
+      suggestedEnvelopeId: 'CAT_DISCRETIONARY_ENTERTAINMENT',
+      suggestedAccountId: 'ACC_FNB_01',
+      isCredit: false,
+      confidenceScore: 0.84,
+      confidenceFactors: {
+        'E-Commerce Order Total Verified': 0.90,
+        'Multiple Potential Envelopes (Groceries vs Wine)': 0.78,
+      },
+      status: ProposalStatus.pending,
+      rawSnippet: 'Thank you for your order #W-99120. Items: Organic produce, prime cuts, pantry essentials, and cellar selection. Total: R3,420.00.',
+    ),
+    EmailTransactionProposal(
+      id: 'PROP_EMAIL_05',
+      emailSubject: 'Private Syndicate Contribution Receipt',
+      senderEmail: 'kudakwashe@syndicate-holdings.co.za',
+      receivedDate: DateTime(2026, 9, 7, 16, 20),
+      documentType: EmailDocumentType.transferAdvice,
+      extractedAmount: 18500.0,
+      currency: 'ZAR',
+      counterparty: 'Kudakwashe Syndicate',
+      referenceNumber: 'SYN-ESCROW-009',
+      accountIdentifier: 'Investec •••• 1044',
+      suggestedEnvelopeId: 'CAT_ESSENTIAL_SAVINGS',
+      suggestedAccountId: 'ACC_INVESTEC_01',
+      isCredit: true,
+      confidenceScore: 0.62,
+      confidenceFactors: {
+        'Informal Email Body Structure': 0.60,
+        'Unknown Sub-Account ID': 0.55,
+        'Amount Unconfirmed by Bank Slip': 0.70,
+      },
+      status: ProposalStatus.pending,
+      rawSnippet: 'Hey Shingi, deposited R18,500 into the Investec holding account for the algorithm escrow sync. Ref SYN-ESCROW-009.',
+    ),
+  ];
+
+  static final List<DepositSlipModel> defaultDepositSlips = [
+    DepositSlipModel(
+      id: 'SLIP_2026_01',
+      bankName: 'Standard Bank Private',
+      imagePath: 'assets/slips/slip_std_bank_85k.jpg',
+      uploadedAt: DateTime(2026, 9, 6, 15, 20),
+      extractedAmount: 85000.0,
+      amountConfidence: 0.94,
+      extractedDate: DateTime(2026, 9, 6),
+      dateConfidence: 0.91,
+      extractedAccountNumber: '00294819284',
+      accountConfidence: 0.89,
+      extractedBranch: 'Sandton City (0129)',
+      branchConfidence: 0.86,
+      extractedReference: 'DEP-SANDTON-85K',
+      matchedAccountId: 'ACC_STDBANK_01',
+      matchedAccountName: 'Standard Bank Private MM Vault',
+      matchType: AccountMatchType.exact,
+      status: DepositSlipStatus.readyForReview,
+      notes: 'Handwritten teller deposit slip: clear figures, teller stamp authenticated.',
+    ),
+    DepositSlipModel(
+      id: 'SLIP_2026_02',
+      bankName: 'Ecobank / FBC',
+      imagePath: 'assets/slips/slip_fbc_usd_2500.jpg',
+      uploadedAt: DateTime(2026, 9, 3, 11, 0),
+      extractedAmount: 45000.0, // R45,000 equivalent for $2,500 USD
+      amountConfidence: 0.92,
+      extractedDate: DateTime(2026, 9, 3),
+      dateConfidence: 0.95,
+      extractedAccountNumber: '99201948271',
+      accountConfidence: 0.88,
+      extractedBranch: 'Harare Corporate (001)',
+      branchConfidence: 0.85,
+      extractedReference: 'USD-CASH-DEP-2500',
+      matchedAccountId: 'ACC_ECOBANK_01',
+      matchedAccountName: 'Ecobank / FBC Offshore USD',
+      matchType: AccountMatchType.exact,
+      userCorrectedAmount: 45000.0,
+      status: DepositSlipStatus.approvedPendingDeposit,
+      notes: 'Offshore USD cash deposit slip converted at R18.00/USD exchange benchmark.',
+    ),
+    DepositSlipModel(
+      id: 'SLIP_2026_03',
+      bankName: 'Nedbank Private Wealth',
+      imagePath: 'assets/slips/slip_nedbank_120k.jpg',
+      uploadedAt: DateTime(2026, 8, 28, 10, 30),
+      extractedAmount: 120000.0,
+      amountConfidence: 0.98,
+      extractedDate: DateTime(2026, 8, 28),
+      dateConfidence: 0.98,
+      extractedAccountNumber: '1948291048',
+      accountConfidence: 0.96,
+      extractedBranch: 'V&A Waterfront (0199)',
+      branchConfidence: 0.94,
+      extractedReference: 'NED-ESTATE-DIV-120K',
+      matchedAccountId: 'ACC_INVESTEC_01',
+      matchedAccountName: 'Investec Prime Portfolio',
+      matchType: AccountMatchType.exact,
+      status: DepositSlipStatus.reconciled,
+      reconciledTransactionId: 'STMT_NED_120K',
+      notes: 'Reconciled with official bank statement on Aug 29.',
+    ),
+  ];
+
+  static final List<StatementTransaction> defaultStatementTransactions = [
+    StatementTransaction(
+      id: 'STMT_TX_01',
+      accountId: 'ACC_FNB_01',
+      accountName: 'First National Bank Private Cheque',
+      statementDate: DateTime(2026, 9, 5),
+      amountZar: 45000.0,
+      isCredit: true,
+      reference: 'REF-APEX-ADV-992',
+      counterparty: 'Apex Global Advisory',
+      source: StatementSource.bankApiSync,
+      isReconciled: true,
+      matchedInternalId: 'PROP_EMAIL_01',
+    ),
+    StatementTransaction(
+      id: 'STMT_TX_02',
+      accountId: 'ACC_STDBANK_01',
+      accountName: 'Standard Bank Private MM Vault',
+      statementDate: DateTime(2026, 9, 6),
+      amountZar: 85000.0,
+      isCredit: true,
+      reference: 'CASH DEP SANDTON BR 0129',
+      counterparty: 'Cash Deposit Teller #4',
+      source: StatementSource.statementUploadPdf,
+      isReconciled: false,
+      matchedInternalId: 'SLIP_2026_01',
+    ),
+    StatementTransaction(
+      id: 'STMT_TX_03',
+      accountId: 'ACC_FNB_01',
+      accountName: 'First National Bank Private Cheque',
+      statementDate: DateTime(2026, 9, 4),
+      amountZar: 14375.0,
+      isCredit: false,
+      reference: 'DISCOVERY CARD SETTLE EFT',
+      counterparty: 'Discovery Bank Credit Card',
+      source: StatementSource.bankApiSync,
+      isReconciled: true,
+      matchedInternalId: 'DEBT_DISCOVERY_CARD',
+    ),
+    StatementTransaction(
+      id: 'STMT_TX_04',
+      accountId: 'ACC_FNB_01',
+      accountName: 'First National Bank Private Cheque',
+      statementDate: DateTime(2026, 9, 6),
+      amountZar: 7850.0,
+      isCredit: false,
+      reference: 'VODACOM CORP DIA 100MBPS',
+      counterparty: 'Vodacom Business Fibre',
+      source: StatementSource.bankApiSync,
+      isReconciled: false,
+    ),
+    StatementTransaction(
+      id: 'STMT_TX_05',
+      accountId: 'ACC_INVESTEC_01',
+      accountName: 'Investec Prime Portfolio',
+      statementDate: DateTime(2026, 8, 28),
+      amountZar: 120000.0,
+      isCredit: true,
+      reference: 'NED-ESTATE-DIV-120K',
+      counterparty: 'Nedgroup Securities Distribution',
+      source: StatementSource.statementUploadCsv,
+      isReconciled: true,
+      matchedInternalId: 'SLIP_2026_03',
+    ),
+  ];
+
+  static final List<ReconciliationMatch> defaultReconciliationMatches = [
+    ReconciliationMatch(
+      id: 'RECON_01',
+      statementTransaction: StatementTransaction(
+        id: 'STMT_TX_01',
+        accountId: 'ACC_FNB_01',
+        accountName: 'First National Bank Private Cheque',
+        statementDate: DateTime(2026, 9, 5),
+        amountZar: 45000.0,
+        isCredit: true,
+        reference: 'REF-APEX-ADV-992',
+        counterparty: 'Apex Global Advisory',
+        source: StatementSource.bankApiSync,
+        isReconciled: true,
+      ),
+      matchedItemType: MatchedItemType.emailProposal,
+      matchedItemId: 'PROP_EMAIL_01',
+      matchedDescription: 'Email Proposal: Apex Advisory Retainer',
+      matchScore: 0.99,
+      status: ReconciliationMatchStatus.reconciled,
+      reconciliationNotes: 'Exact amount, date match (0 days), and matching reference REF-APEX-ADV-992.',
+      resolvedAt: DateTime(2026, 9, 5, 14, 35),
+    ),
+    ReconciliationMatch(
+      id: 'RECON_02',
+      statementTransaction: StatementTransaction(
+        id: 'STMT_TX_02',
+        accountId: 'ACC_STDBANK_01',
+        accountName: 'Standard Bank Private MM Vault',
+        statementDate: DateTime(2026, 9, 6),
+        amountZar: 85000.0,
+        isCredit: true,
+        reference: 'CASH DEP SANDTON BR 0129',
+        counterparty: 'Cash Deposit Teller #4',
+        source: StatementSource.statementUploadPdf,
+      ),
+      matchedItemType: MatchedItemType.depositSlip,
+      matchedItemId: 'SLIP_2026_01',
+      matchedDescription: 'OCR Deposit Slip: Sandton City R85,000',
+      matchScore: 0.94,
+      status: ReconciliationMatchStatus.needsReview,
+      reconciliationNotes: 'Amount matches slip (R85,000.00) on 2026-09-06. Awaiting final user approval of deposit slip.',
+      candidateMatchIds: ['SLIP_2026_01'],
+    ),
+    ReconciliationMatch(
+      id: 'RECON_03',
+      statementTransaction: StatementTransaction(
+        id: 'STMT_TX_04',
+        accountId: 'ACC_FNB_01',
+        accountName: 'First National Bank Private Cheque',
+        statementDate: DateTime(2026, 9, 6),
+        amountZar: 7850.0,
+        isCredit: false,
+        reference: 'VODACOM CORP DIA 100MBPS',
+        counterparty: 'Vodacom Business Fibre',
+        source: StatementSource.bankApiSync,
+      ),
+      matchedItemType: MatchedItemType.none,
+      matchScore: 0.0,
+      status: ReconciliationMatchStatus.unmatchedException,
+      reconciliationNotes: 'No matching transaction in internal ledger or pending email capture queue. Suggested: Create missing expense entry.',
+    ),
+  ];
+
+  static final List<AutoAddAuditRecord> defaultAutoAddAuditLogs = [
+    AutoAddAuditRecord(
+      id: 'AUDIT_01',
+      timestamp: DateTime(2026, 9, 5, 14, 31),
+      sourceType: 'Email / Google Workspace',
+      createdTransactionId: 'TX_AUTO_APEX_01',
+      counterparty: 'Apex Global Advisory',
+      amountZar: 45000.0,
+      currency: 'ZAR',
+      confidenceScore: 0.98,
+      decisionReason: 'Confidence 98% exceeded high confidence threshold (95%). Verified bank notification token and structured invoice reference.',
+      rawSnippet: 'FNB Alert: R45,000.00 credited to *4921 from Apex Global Advisory. Ref: REF-APEX-ADV-992.',
+    ),
+    AutoAddAuditRecord(
+      id: 'AUDIT_02',
+      timestamp: DateTime(2026, 9, 4, 9, 16),
+      sourceType: 'Email / Google Workspace',
+      createdTransactionId: 'TX_AUTO_AWS_01',
+      counterparty: 'Amazon Web Services EMEA',
+      amountZar: 12450.0,
+      currency: 'ZAR',
+      confidenceScore: 0.96,
+      decisionReason: 'Confidence 96% exceeded high confidence threshold (95%). Corporate tax invoice PDF verified with standard monthly hosting pattern.',
+      rawSnippet: 'AWS EMEA Tax Invoice INV-AWS-2026-881: Total ZAR 12,450.00 charged to Standard Bank *8820.',
+    ),
+  ];
+
+  static final List<KnownObligation> defaultObligations = [
+    KnownObligation(
+      id: 'OBLIG_GT3_FINANCE',
+      title: 'FNB Asset Finance (Porsche 911 GT3)',
+      dueDate: DateTime(2026, 9, 18),
+      amountZar: 40000.0,
+      targetEnvelopeId: 'CAT_SINKING_MAINTENANCE',
+      accountId: 'ACC_FNB_01',
+      isRecurring: true,
+    ),
+    KnownObligation(
+      id: 'OBLIG_CAMPS_BAY_MUNI',
+      title: 'Camps Bay Villa Municipal Rates & Security',
+      dueDate: DateTime(2026, 9, 15),
+      amountZar: 18500.0,
+      targetEnvelopeId: 'CAT_ESSENTIAL_HOUSING',
+      accountId: 'ACC_FNB_01',
+      isRecurring: true,
+    ),
+    KnownObligation(
+      id: 'OBLIG_DISCOVERY_HEALTH',
+      title: 'Discovery Executive Health & Comprehensive Insure',
+      dueDate: DateTime(2026, 9, 22),
+      amountZar: 12800.0,
+      targetEnvelopeId: 'CAT_ESSENTIAL_HOUSING',
+      accountId: 'ACC_FNB_01',
+      isRecurring: true,
+    ),
+    KnownObligation(
+      id: 'OBLIG_GCP_CLOUD',
+      title: 'Google Cloud Platform Cluster Infrastructure',
+      dueDate: DateTime(2026, 9, 29),
+      amountZar: 16500.0,
+      targetEnvelopeId: 'CAT_TECH_CLOUD',
+      accountId: 'ACC_STDBANK_01',
+      isRecurring: true,
+    ),
+  ];
+
+  static final List<BankSyncConnection> defaultBankConnections = [
+    BankSyncConnection(
+      id: 'SYNC_FNB_01',
+      institutionName: 'First National Bank',
+      accountNumberMasked: '•••• 4921',
+      accountType: 'Private Wealth Cheque',
+      currentBalanceZar: 245800.0,
+      nativeCurrency: 'ZAR',
+      nativeBalance: 245800.0,
+      lastSyncedAt: DateTime.now().subtract(const Duration(minutes: 6)),
+      status: BankSyncStatus.synced,
+      provider: 'OpenBanking ZA',
+      linkedLocalAccountId: 'ACC_FNB_01',
+    ),
+    BankSyncConnection(
+      id: 'SYNC_STDBANK_01',
+      institutionName: 'Standard Bank Private',
+      accountNumberMasked: '•••• 8820',
+      accountType: 'Money Market Liquidity Vault',
+      currentBalanceZar: 520000.0,
+      nativeCurrency: 'ZAR',
+      nativeBalance: 520000.0,
+      lastSyncedAt: DateTime.now().subtract(const Duration(minutes: 18)),
+      status: BankSyncStatus.synced,
+      provider: 'Stitch Direct',
+      linkedLocalAccountId: 'ACC_STDBANK_01',
+    ),
+    BankSyncConnection(
+      id: 'SYNC_INVESTEC_01',
+      institutionName: 'Investec Private Bank',
+      accountNumberMasked: '•••• 1044',
+      accountType: 'Global Prime Securities Portfolio',
+      currentBalanceZar: 1450000.0,
+      nativeCurrency: 'ZAR',
+      nativeBalance: 1450000.0,
+      lastSyncedAt: DateTime.now().subtract(const Duration(minutes: 42)),
+      status: BankSyncStatus.synced,
+      provider: 'Plaid Global',
+      linkedLocalAccountId: 'ACC_INVESTEC_01',
+    ),
+    BankSyncConnection(
+      id: 'SYNC_ECOBANK_01',
+      institutionName: 'Ecobank / FBC Offshore',
+      accountNumberMasked: '•••• 7701',
+      accountType: 'Offshore USD Liquidity Vault',
+      currentBalanceZar: 380000.0,
+      nativeCurrency: 'USD',
+      nativeBalance: 21111.0,
+      lastSyncedAt: DateTime.now().subtract(const Duration(hours: 2)),
+      status: BankSyncStatus.synced,
+      provider: 'OpenBanking Direct',
+      linkedLocalAccountId: 'ACC_ECOBANK_01',
+    ),
+  ];
+
+  static final List<TrustedContact> defaultTrustedContacts = [
+    TrustedContact(
+      id: 'CONTACT_SOPHIA',
+      fullName: 'Sophia Chapwanya',
+      relationship: 'Spouse & Primary Beneficiary',
+      email: 'sophia.c@executive.co.za',
+      phoneNumber: '+27 82 555 9012',
+      accessLevel: VaultAccessLevel.fullDossier,
+      isConfirmed: true,
+      designatedAt: DateTime(2026, 1, 15),
+    ),
+    TrustedContact(
+      id: 'CONTACT_EXECUTOR',
+      fullName: 'Adv. Michael Van Der Merwe',
+      relationship: 'Designated Estate Executor (Bowman Gilfillan)',
+      email: 'm.vandermerwe@bowmanslaw.com',
+      phoneNumber: '+27 21 480 7800',
+      accessLevel: VaultAccessLevel.emergencyTrustee,
+      isConfirmed: true,
+      designatedAt: DateTime(2026, 2, 10),
+    ),
+    TrustedContact(
+      id: 'CONTACT_TARIRO',
+      fullName: 'Tariro Chapwanya',
+      relationship: 'Heir & Secondary Beneficiary',
+      email: 'tariro.c@executive.co.za',
+      phoneNumber: '+27 83 992 1104',
+      accessLevel: VaultAccessLevel.readOnlySummary,
+      isConfirmed: true,
+      designatedAt: DateTime(2026, 5, 20),
+    ),
+  ];
+
+  static final List<VaultAuditLog> defaultVaultAuditLogs = [
+    VaultAuditLog(
+      id: 'VAULT_LOG_01',
+      timestamp: DateTime(2026, 9, 1, 10, 0),
+      action: 'VAULT_PIN_VERIFIED',
+      actorName: 'Shingirai Chapwanya (Primary Principal)',
+      details: 'Vault access unlocked with secondary executive authentication PIN.',
+    ),
+    VaultAuditLog(
+      id: 'VAULT_LOG_02',
+      timestamp: DateTime(2026, 8, 15, 14, 20),
+      action: 'ESTATE_DOSSIER_EXPORTED',
+      actorName: 'Shingirai Chapwanya',
+      details: 'Generated complete Estate Portfolio & Asset Registry Dossier for Bowman Gilfillan annual review.',
+    ),
+  ];
+
   SqliteService._internal() {
     _ensureDefaultData();
   }
@@ -580,6 +1088,33 @@ class SqliteService {
     if (_mockStrategicGoals.isEmpty) {
       _mockStrategicGoals.addAll(defaultStrategicGoals);
     }
+    if (_mockEmailProposals.isEmpty) {
+      _mockEmailProposals.addAll(defaultEmailProposals);
+    }
+    if (_mockDepositSlips.isEmpty) {
+      _mockDepositSlips.addAll(defaultDepositSlips);
+    }
+    if (_mockStatementTransactions.isEmpty) {
+      _mockStatementTransactions.addAll(defaultStatementTransactions);
+    }
+    if (_mockReconciliationMatches.isEmpty) {
+      _mockReconciliationMatches.addAll(defaultReconciliationMatches);
+    }
+    if (_mockAutoAddAuditLogs.isEmpty) {
+      _mockAutoAddAuditLogs.addAll(defaultAutoAddAuditLogs);
+    }
+    if (_mockObligations.isEmpty) {
+      _mockObligations.addAll(defaultObligations);
+    }
+    if (_mockBankSyncConnections.isEmpty) {
+      _mockBankSyncConnections.addAll(defaultBankConnections);
+    }
+    if (_mockTrustedContacts.isEmpty) {
+      _mockTrustedContacts.addAll(defaultTrustedContacts);
+    }
+    if (_mockVaultAuditLogs.isEmpty) {
+      _mockVaultAuditLogs.addAll(defaultVaultAuditLogs);
+    }
   }
 
   void _ensureDefaultEnvelopes() {
@@ -598,6 +1133,15 @@ class SqliteService {
     _mockScenarios.clear();
     _mockTaxSkims.clear();
     _mockStrategicGoals.clear();
+    _mockEmailProposals.clear();
+    _mockDepositSlips.clear();
+    _mockStatementTransactions.clear();
+    _mockReconciliationMatches.clear();
+    _mockAutoAddAuditLogs.clear();
+    _mockObligations.clear();
+    _mockBankSyncConnections.clear();
+    _mockTrustedContacts.clear();
+    _mockVaultAuditLogs.clear();
     _ensureDefaultData();
     debugPrint('[SqliteService] Caches invalidated. Clean live state active.');
   }
@@ -1559,4 +2103,715 @@ class SqliteService {
       statusNudge: 'Tactical CFO Recommendation: Build 6-Month Emergency Runway to preserve wealth baseline.',
     );
   }
+
+  // ==========================================
+  // PHASE FOUR: AUTO PILOT INTELLIGENCE
+  // ==========================================
+
+  // --- 1. Email-to-Ledger Intelligence ---
+
+  List<EmailTransactionProposal> getEmailProposals() {
+    _ensureDefaultData();
+    return List.unmodifiable(_mockEmailProposals);
+  }
+
+  GoogleWorkspaceConnection getWorkspaceConnection() {
+    return _workspaceConnection;
+  }
+
+  void saveWorkspaceConnection(GoogleWorkspaceConnection conn) {
+    _workspaceConnection = conn;
+  }
+
+  Future<TransactionModel> keepEmailProposal(String proposalId) async {
+    _ensureDefaultData();
+    final idx = _mockEmailProposals.indexWhere((p) => p.id == proposalId);
+    if (idx == -1) {
+      throw Exception('Proposal $proposalId not found');
+    }
+    final proposal = _mockEmailProposals[idx];
+    final txnId = 'TX_EMAIL_${const Uuid().v4().substring(0, 8)}';
+
+    final txn = TransactionModel(
+      transactionId: txnId,
+      accountId: proposal.suggestedAccountId,
+      categoryId: proposal.suggestedEnvelopeId,
+      categoryName: 'Email Ingestion Transaction',
+      transactionType: proposal.isCredit ? 'INCOME' : 'EXPENSE',
+      originalAmount: proposal.isCredit ? proposal.extractedAmount : -proposal.extractedAmount,
+      originalCurrency: proposal.currency,
+      reportingAmountZar: proposal.extractedAmount,
+      reportingAmountUsd: proposal.extractedAmount / 18.5,
+      merchantOrPayee: '${proposal.counterparty} (${proposal.referenceNumber})',
+      transactionDate: proposal.receivedDate.toIso8601String().substring(0, 10),
+      notes: 'Imported from Email: ${proposal.emailSubject}',
+    );
+
+    await saveTransaction(txn);
+
+    _mockEmailProposals[idx] = proposal.copyWith(
+      status: ProposalStatus.kept,
+      reviewedAt: DateTime.now(),
+      createdTransactionId: txnId,
+    );
+
+    return txn;
+  }
+
+  Future<void> removeEmailProposal(String proposalId, {bool ignorePattern = false}) async {
+    _ensureDefaultData();
+    final idx = _mockEmailProposals.indexWhere((p) => p.id == proposalId);
+    if (idx != -1) {
+      final proposal = _mockEmailProposals[idx];
+      _mockEmailProposals[idx] = proposal.copyWith(
+        status: ignorePattern ? ProposalStatus.ignoredPattern : ProposalStatus.removed,
+        reviewedAt: DateTime.now(),
+      );
+
+      if (ignorePattern) {
+        final updatedIgnored = List<String>.from(_workspaceConnection.ignoredPatterns);
+        if (!updatedIgnored.contains(proposal.counterparty)) {
+          updatedIgnored.add(proposal.counterparty);
+          _workspaceConnection = _workspaceConnection.copyWith(ignoredPatterns: updatedIgnored);
+        }
+      }
+    }
+  }
+
+  Future<int> scanGoogleWorkspaceEmails({bool manualTrigger = false}) async {
+    _ensureDefaultData();
+    _workspaceConnection = _workspaceConnection.copyWith(lastScanTime: DateTime.now());
+
+    final newProposals = [
+      EmailTransactionProposal(
+        id: 'PROP_SCAN_${DateTime.now().millisecondsSinceEpoch}',
+        emailSubject: 'Uber Trip & Business Travel Receipt',
+        senderEmail: 'uber.southafrica@uber.com',
+        receivedDate: DateTime.now().subtract(const Duration(hours: 3)),
+        documentType: EmailDocumentType.receipt,
+        extractedAmount: 640.0,
+        currency: 'ZAR',
+        counterparty: 'Uber Cape Town Corporate',
+        referenceNumber: 'UBR-CPT-${DateTime.now().millisecond}',
+        accountIdentifier: 'FNB •••• 4921',
+        suggestedEnvelopeId: 'CAT_SINKING_MAINTENANCE',
+        suggestedAccountId: 'ACC_FNB_01',
+        isCredit: false,
+        confidenceScore: 0.96,
+        confidenceFactors: {
+          'Verified Transport Merchant': 0.98,
+          'Receipt Matching Format': 0.95,
+        },
+        status: ProposalStatus.pending,
+        rawSnippet: 'Receipt for your Uber trip on Sep 7, 2026. Total ZAR 640.00 charged to FNB •••• 4921.',
+      ),
+      EmailTransactionProposal(
+        id: 'PROP_SCAN_${DateTime.now().millisecondsSinceEpoch + 1}',
+        emailSubject: 'Payment Received from Apex Retainer',
+        senderEmail: 'billing@apexconsulting.co.za',
+        receivedDate: DateTime.now().subtract(const Duration(hours: 5)),
+        documentType: EmailDocumentType.paymentNotification,
+        extractedAmount: 28500.0,
+        currency: 'ZAR',
+        counterparty: 'Apex Consulting Global',
+        referenceNumber: 'STRIPE-PAY-7721',
+        accountIdentifier: 'Standard Bank •••• 8820',
+        suggestedEnvelopeId: 'CAT_ESSENTIAL_SAVINGS',
+        suggestedAccountId: 'ACC_STDBANK_01',
+        isCredit: true,
+        confidenceScore: 0.97,
+        confidenceFactors: {
+          'Cryptographic Webhook Signature': 1.0,
+          'Bank Direct Deposit Match': 0.98,
+        },
+        status: ProposalStatus.pending,
+        rawSnippet: 'Payout of ZAR 28,500.00 has been sent to your Standard Bank account ending in 8820. Ref: STRIPE-PAY-7721.',
+      ),
+    ];
+
+    int autoAddedCount = 0;
+    for (final prop in newProposals) {
+      if (_evaluateConfidenceAndAutoAdd(prop)) {
+        autoAddedCount++;
+      } else {
+        _mockEmailProposals.insert(0, prop);
+      }
+    }
+    if (manualTrigger) {
+      debugPrint('[SqliteService] Manual email scan ingested ${newProposals.length} docs ($autoAddedCount auto-added).');
+    }
+
+    return newProposals.length;
+  }
+
+  // --- 2. Handwritten Bank Deposit Slips OCR Pipeline ---
+
+  List<DepositSlipModel> getDepositSlips() {
+    _ensureDefaultData();
+    return List.unmodifiable(_mockDepositSlips);
+  }
+
+  Future<DepositSlipModel> processDepositSlipOcr({
+    required String bankName,
+    String? imagePath,
+    String? imageDataUri,
+    double? manualAmount,
+    String? manualAccount,
+    String? reference,
+  }) async {
+    _ensureDefaultData();
+    final slipId = 'SLIP_${DateTime.now().millisecondsSinceEpoch}';
+
+    // OCR Heuristic: parse bank details and map internal account
+    String matchedAccId = 'ACC_STDBANK_01';
+    String matchedAccName = 'Standard Bank Private MM Vault';
+    if (bankName.toLowerCase().contains('fnb')) {
+      matchedAccId = 'ACC_FNB_01';
+      matchedAccName = 'First National Bank Private Cheque';
+    } else if (bankName.toLowerCase().contains('investec')) {
+      matchedAccId = 'ACC_INVESTEC_01';
+      matchedAccName = 'Investec Prime Portfolio';
+    } else if (bankName.toLowerCase().contains('ecobank') || bankName.toLowerCase().contains('fbc')) {
+      matchedAccId = 'ACC_ECOBANK_01';
+      matchedAccName = 'Ecobank / FBC Offshore USD';
+    }
+
+    final amount = manualAmount ?? 65000.0;
+
+    final newSlip = DepositSlipModel(
+      id: slipId,
+      bankName: bankName,
+      imagePath: imagePath ?? 'assets/slips/deposit_slip_uploaded.jpg',
+      imageDataUri: imageDataUri,
+      uploadedAt: DateTime.now(),
+      extractedAmount: amount,
+      amountConfidence: 0.93,
+      extractedDate: DateTime.now(),
+      dateConfidence: 0.90,
+      extractedAccountNumber: '00294819284',
+      accountConfidence: 0.88,
+      extractedBranch: '$bankName Corporate Teller Branch',
+      branchConfidence: 0.84,
+      extractedReference: reference ?? 'DEP-OCR-${const Uuid().v4().substring(0, 6).toUpperCase()}',
+      matchedAccountId: manualAccount ?? matchedAccId,
+      matchedAccountName: matchedAccName,
+      matchType: manualAccount != null ? AccountMatchType.manual : AccountMatchType.exact,
+      status: DepositSlipStatus.readyForReview,
+      notes: 'Processed through Ziva OCR pipeline for handwritten deposit slips.',
+    );
+
+    _mockDepositSlips.insert(0, newSlip);
+    return newSlip;
+  }
+
+  void updateDepositSlipCorrection(
+    String slipId, {
+    double? correctedAmount,
+    DateTime? correctedDate,
+    String? correctedAccountId,
+  }) {
+    _ensureDefaultData();
+    final idx = _mockDepositSlips.indexWhere((s) => s.id == slipId);
+    if (idx != -1) {
+      _mockDepositSlips[idx] = _mockDepositSlips[idx].copyWith(
+        userCorrectedAmount: correctedAmount,
+        userCorrectedDate: correctedDate,
+        userCorrectedAccountId: correctedAccountId,
+      );
+    }
+  }
+
+  Future<TransactionModel> approvePendingDeposit(String slipId) async {
+    _ensureDefaultData();
+    final idx = _mockDepositSlips.indexWhere((s) => s.id == slipId);
+    if (idx == -1) {
+      throw Exception('Deposit slip $slipId not found');
+    }
+    final slip = _mockDepositSlips[idx];
+    final txnId = 'TX_SLIP_${const Uuid().v4().substring(0, 8)}';
+
+    final txn = TransactionModel(
+      transactionId: txnId,
+      accountId: slip.effectiveAccountId ?? 'ACC_STDBANK_01',
+      categoryId: 'CAT_ESSENTIAL_SAVINGS',
+      categoryName: 'Bank Deposit / Inflow',
+      transactionType: 'INCOME',
+      originalAmount: slip.effectiveAmount,
+      originalCurrency: 'ZAR',
+      reportingAmountZar: slip.effectiveAmount,
+      reportingAmountUsd: slip.effectiveAmount / 18.5,
+      merchantOrPayee: 'Bank Deposit: ${slip.bankName} (${slip.extractedReference ?? slip.id})',
+      transactionDate: slip.effectiveDate.toIso8601String().substring(0, 10),
+      notes: 'Authenticated handwritten deposit slip approved via OCR pipeline.',
+    );
+
+    await saveTransaction(txn);
+
+    _mockDepositSlips[idx] = slip.copyWith(
+      status: DepositSlipStatus.approvedPendingDeposit,
+      reconciledTransactionId: txnId,
+    );
+
+    return txn;
+  }
+
+  // --- 3. Reconciliation Engine ---
+
+  List<StatementTransaction> getStatementTransactions() {
+    _ensureDefaultData();
+    return List.unmodifiable(_mockStatementTransactions);
+  }
+
+  List<ReconciliationMatch> getReconciliationMatches() {
+    _ensureDefaultData();
+    return List.unmodifiable(_mockReconciliationMatches);
+  }
+
+  Future<void> runReconciliationEngine() async {
+    _ensureDefaultData();
+    _mockReconciliationMatches.clear();
+
+    for (final stmt in _mockStatementTransactions) {
+      // 1. Try matching with approved deposit slips
+      final matchingSlip = _mockDepositSlips.firstWhere(
+        (s) =>
+            (s.effectiveAmount - stmt.amountZar).abs() < 1.0 &&
+            (s.effectiveDate.difference(stmt.statementDate).inDays).abs() <= 2,
+        orElse: () => DepositSlipModel(id: '', uploadedAt: DateTime.now()),
+      );
+
+      if (matchingSlip.id.isNotEmpty) {
+        _mockReconciliationMatches.add(
+          ReconciliationMatch(
+            id: 'RECON_${stmt.id}',
+            statementTransaction: stmt.copyWith(isReconciled: true, matchedInternalId: matchingSlip.id),
+            matchedItemType: MatchedItemType.depositSlip,
+            matchedItemId: matchingSlip.id,
+            matchedDescription: 'Deposit Slip: ${matchingSlip.bankName} (R${matchingSlip.effectiveAmount.toStringAsFixed(2)})',
+            matchScore: 0.96,
+            status: ReconciliationMatchStatus.reconciled,
+            reconciliationNotes: 'Matched with handwritten deposit slip on amount and date.',
+            resolvedAt: DateTime.now(),
+          ),
+        );
+        continue;
+      }
+
+      // 2. Try matching with email proposals
+      final matchingEmail = _mockEmailProposals.firstWhere(
+        (p) =>
+            (p.extractedAmount - stmt.amountZar).abs() < 1.0 &&
+            (p.receivedDate.difference(stmt.statementDate).inDays).abs() <= 2,
+        orElse: () => EmailTransactionProposal(
+          id: '',
+          emailSubject: '',
+          senderEmail: '',
+          receivedDate: DateTime.now(),
+          documentType: EmailDocumentType.receipt,
+          extractedAmount: 0,
+          counterparty: '',
+          referenceNumber: '',
+          accountIdentifier: '',
+          confidenceScore: 0,
+          rawSnippet: '',
+        ),
+      );
+
+      if (matchingEmail.id.isNotEmpty) {
+        _mockReconciliationMatches.add(
+          ReconciliationMatch(
+            id: 'RECON_${stmt.id}',
+            statementTransaction: stmt.copyWith(isReconciled: true, matchedInternalId: matchingEmail.id),
+            matchedItemType: MatchedItemType.emailProposal,
+            matchedItemId: matchingEmail.id,
+            matchedDescription: 'Email Proposal: ${matchingEmail.counterparty}',
+            matchScore: 0.98,
+            status: ReconciliationMatchStatus.reconciled,
+            reconciliationNotes: 'Matched with parsed email document and statement line.',
+            resolvedAt: DateTime.now(),
+          ),
+        );
+        continue;
+      }
+
+      // 3. Try matching with local ledger transactions
+      final matchingTx = _mockTransactions.firstWhere(
+        (t) {
+          final txDate = DateTime.tryParse(t.transactionDate) ?? DateTime.now();
+          return (t.reportingAmountZar - stmt.amountZar).abs() < 1.0 &&
+              (txDate.difference(stmt.statementDate).inDays).abs() <= 2;
+        },
+        orElse: () => TransactionModel(
+          transactionId: '',
+          transactionDate: '',
+          accountId: '',
+          categoryId: '',
+          transactionType: 'EXPENSE',
+          originalAmount: 0,
+          originalCurrency: 'ZAR',
+          reportingAmountZar: 0,
+          reportingAmountUsd: 0,
+          merchantOrPayee: '',
+        ),
+      );
+
+      if (matchingTx.transactionId.isNotEmpty) {
+        _mockReconciliationMatches.add(
+          ReconciliationMatch(
+            id: 'RECON_${stmt.id}',
+            statementTransaction: stmt.copyWith(isReconciled: true, matchedInternalId: matchingTx.transactionId),
+            matchedItemType: MatchedItemType.internalLedger,
+            matchedItemId: matchingTx.transactionId,
+            matchedDescription: 'Ledger Entry: ${matchingTx.merchantOrPayee}',
+            matchScore: 0.95,
+            status: ReconciliationMatchStatus.reconciled,
+            reconciliationNotes: 'Direct match with internal recorded transaction.',
+            resolvedAt: DateTime.now(),
+          ),
+        );
+        continue;
+      }
+
+      // 4. If no match found -> flag as exception
+      _mockReconciliationMatches.add(
+        ReconciliationMatch(
+          id: 'RECON_${stmt.id}',
+          statementTransaction: stmt.copyWith(isReconciled: false),
+          matchedItemType: MatchedItemType.none,
+          matchScore: 0.0,
+          status: ReconciliationMatchStatus.unmatchedException,
+          reconciliationNotes: 'No matching transaction in internal ledger or pending email queue. Action needed.',
+        ),
+      );
+    }
+  }
+
+  ReconciliationSummary getReconciliationSummary() {
+    _ensureDefaultData();
+    final matches = getReconciliationMatches();
+    final reconciled = matches.where((m) => m.status == ReconciliationMatchStatus.reconciled).toList();
+    final unreconciled = matches.where((m) => m.status != ReconciliationMatchStatus.reconciled).toList();
+
+    final reconciledTotal = reconciled.fold<double>(0.0, (s, m) => s + m.statementTransaction.amountZar);
+    final unreconciledTotal = unreconciled.fold<double>(0.0, (s, m) => s + m.statementTransaction.amountZar);
+
+    final Map<String, int> breakdowns = {};
+    for (final m in matches) {
+      final acc = m.statementTransaction.accountName;
+      breakdowns[acc] = (breakdowns[acc] ?? 0) + 1;
+    }
+
+    return ReconciliationSummary(
+      reconciledCount: reconciled.length,
+      reconciledTotalZar: reconciledTotal,
+      unreconciledCount: unreconciled.length,
+      unreconciledTotalZar: unreconciledTotal,
+      exceptionsCount: unreconciled.length,
+      accountBreakdowns: breakdowns,
+    );
+  }
+
+  Future<void> resolveReconciliationMismatch(
+    String matchId, {
+    required String action, // 'confirmAsMissing', 'linkExisting', 'discard'
+    String? targetInternalId,
+  }) async {
+    _ensureDefaultData();
+    final idx = _mockReconciliationMatches.indexWhere((m) => m.id == matchId);
+    if (idx != -1) {
+      final current = _mockReconciliationMatches[idx];
+      if (action == 'confirmAsMissing') {
+        // Create the missing transaction directly from statement
+        final stmt = current.statementTransaction;
+        final txn = TransactionModel(
+          transactionId: 'TX_STMT_${const Uuid().v4().substring(0, 8)}',
+          accountId: stmt.accountId,
+          categoryId: 'CAT_ESSENTIAL_HOUSING',
+          categoryName: 'Bank Statement Item',
+          transactionType: stmt.isCredit ? 'INCOME' : 'EXPENSE',
+          originalAmount: stmt.isCredit ? stmt.amountZar : -stmt.amountZar,
+          originalCurrency: 'ZAR',
+          reportingAmountZar: stmt.amountZar,
+          reportingAmountUsd: stmt.amountZar / 18.5,
+          merchantOrPayee: '${stmt.counterparty} (${stmt.reference})',
+          transactionDate: stmt.statementDate.toIso8601String().substring(0, 10),
+          notes: 'Auto-resolved from official bank statement line item.',
+        );
+        await saveTransaction(txn);
+        _mockReconciliationMatches[idx] = current.copyWith(
+          status: ReconciliationMatchStatus.reconciled,
+          matchedItemType: MatchedItemType.internalLedger,
+          matchedItemId: txn.transactionId,
+          matchedDescription: txn.merchantOrPayee,
+          matchScore: 1.0,
+          reconciliationNotes: 'Resolved: Missing transaction generated and reconciled.',
+          resolvedAt: DateTime.now(),
+        );
+      } else if (action == 'discard') {
+        _mockReconciliationMatches.removeAt(idx);
+      }
+    }
+  }
+
+  // --- 4. Confidence Engine & Auto-Add Rules ---
+
+  ConfidenceEngineConfig getConfidenceConfig() {
+    return _confidenceConfig;
+  }
+
+  void saveConfidenceConfig(ConfidenceEngineConfig config) {
+    _confidenceConfig = config;
+  }
+
+  List<AutoAddAuditRecord> getAutoAddAuditLogs() {
+    _ensureDefaultData();
+    return List.unmodifiable(_mockAutoAddAuditLogs);
+  }
+
+  bool _evaluateConfidenceAndAutoAdd(EmailTransactionProposal proposal) {
+    if (!_confidenceConfig.autoAddEnabled) return false;
+    final threshold = _confidenceConfig.highConfidenceThresholdPercent / 100.0;
+
+    if (proposal.confidenceScore >= threshold) {
+      final txnId = 'TX_AUTO_${const Uuid().v4().substring(0, 8)}';
+      final txn = TransactionModel(
+        transactionId: txnId,
+        accountId: proposal.suggestedAccountId,
+        categoryId: proposal.suggestedEnvelopeId,
+        categoryName: 'Auto-Added Email Transaction',
+        transactionType: proposal.isCredit ? 'INCOME' : 'EXPENSE',
+        originalAmount: proposal.isCredit ? proposal.extractedAmount : -proposal.extractedAmount,
+        originalCurrency: proposal.currency,
+        reportingAmountZar: proposal.extractedAmount,
+        reportingAmountUsd: proposal.extractedAmount / 18.5,
+        merchantOrPayee: 'Auto-Added (Email): ${proposal.counterparty}',
+        transactionDate: proposal.receivedDate.toIso8601String().substring(0, 10),
+        notes: 'Auto-added by Confidence Engine (${proposal.formattedConfidence} confidence).',
+      );
+
+      saveTransaction(txn);
+
+      final auditRecord = AutoAddAuditRecord(
+        id: 'AUDIT_${DateTime.now().millisecondsSinceEpoch}',
+        timestamp: DateTime.now(),
+        sourceType: 'Email / Google Workspace',
+        createdTransactionId: txnId,
+        counterparty: proposal.counterparty,
+        amountZar: proposal.extractedAmount,
+        currency: proposal.currency,
+        confidenceScore: proposal.confidenceScore,
+        decisionReason: 'Confidence ${proposal.formattedConfidence} met high confidence threshold (${_confidenceConfig.highConfidenceThresholdPercent.toStringAsFixed(0)}%).',
+        rawSnippet: proposal.rawSnippet,
+      );
+
+      _mockAutoAddAuditLogs.insert(0, auditRecord);
+      _mockEmailProposals.insert(
+        0,
+        proposal.copyWith(
+          status: ProposalStatus.autoAdded,
+          createdTransactionId: txnId,
+          reviewedAt: DateTime.now(),
+        ),
+      );
+      return true;
+    }
+    return false;
+  }
+
+  // --- 5. Predictive Cash Flow Alerts & Early Warning System ---
+
+  List<KnownObligation> getKnownObligations() {
+    _ensureDefaultData();
+    return List.unmodifiable(_mockObligations);
+  }
+
+  PredictiveCashFlowProjection calculatePredictiveCashFlowProjections({int horizonDays = 30}) {
+    _ensureDefaultData();
+
+    // Calculate total liquid cash across accounts
+    double currentLiquid = 0.0;
+    for (final a in _mockAccounts) {
+      currentLiquid += a.nativeBalance;
+    }
+    if (currentLiquid <= 0) currentLiquid = 245800.0 + 520000.0; // Benchmark liquidity
+
+    // Upcoming obligations within horizon
+    final horizonEnd = DateTime.now().add(Duration(days: horizonDays));
+    final relevantObligations = _mockObligations.where((o) => o.dueDate.isBefore(horizonEnd)).toList();
+    final obligationsTotal = relevantObligations.fold<double>(0.0, (s, o) => s + o.amountZar);
+
+    // Projected daily burn rate based on standard living costs
+    const dailyBurnRate = 3200.0;
+    const expectedInflows = 45000.0; // Upcoming advisory retainer
+
+    final projectedLiquid = currentLiquid - obligationsTotal - (dailyBurnRate * horizonDays) + expectedInflows;
+
+    final List<PredictiveAlert> alerts = [];
+
+    // Early warning alert if projected liquid balance drops below safe threshold (R60,000)
+    if (projectedLiquid < 150000.0) {
+      alerts.add(
+        PredictiveAlert(
+          id: 'ALERT_CASH_CRUNCH_01',
+          severity: AlertSeverity.critical,
+          headline: 'High-Probability Cash Squeeze Ahead in ${horizonDays > 14 ? 14 : horizonDays} Days',
+          explanation: 'At current spending velocity (R3,200/day) plus upcoming debt obligations (R$obligationsTotal), projected liquid reserves will compress to R${projectedLiquid.toStringAsFixed(0)}.',
+          targetName: 'First National Bank Operating Cheque',
+          breachDate: DateTime.now().add(Duration(days: horizonDays > 14 ? 14 : horizonDays)),
+          projectedShortfallZar: 60000.0,
+          suggestedMitigations: [
+            'Sweep R45,000 from Standard Bank Money Market Vault into FNB Operating.',
+            'Delay SaaS Server Expansion by 14 days to preserve R32,000 liquidity.',
+            'Trigger early collection on Apex Retainer receivable.',
+          ],
+        ),
+      );
+    }
+
+    // Envelope burn warning
+    alerts.add(
+      PredictiveAlert(
+        id: 'ALERT_ENVELOPE_BURN_02',
+        severity: AlertSeverity.warning,
+        headline: 'Discretionary Dining Burn Rate Exceeds Monthly Ceiling',
+        explanation: 'Dining and entertainment envelope is on track to exhaust budget 9 days before month-end.',
+        targetName: 'Discretionary Dining & Hospitality',
+        breachDate: DateTime.now().add(const Duration(days: 9)),
+        projectedShortfallZar: 4200.0,
+        suggestedMitigations: [
+          'Cap dining out spend to R1,200/week for remainder of month.',
+          'Rebalance R3,000 from General Sinking fund.',
+        ],
+      ),
+    );
+
+    return PredictiveCashFlowProjection(
+      horizonDays: horizonDays,
+      currentLiquidZar: currentLiquid,
+      projectedLiquidZar: projectedLiquid,
+      dailyBurnRateZar: dailyBurnRate,
+      upcomingObligationsTotalZar: obligationsTotal,
+      expectedInflowsTotalZar: expectedInflows,
+      upcomingObligations: relevantObligations,
+      alerts: alerts,
+    );
+  }
+
+  List<PredictiveAlert> getPredictiveAlerts() {
+    return calculatePredictiveCashFlowProjections().alerts;
+  }
+
+  // --- 6. Real-Time Bank Balance Sync APIs ---
+
+  List<BankSyncConnection> getBankConnections() {
+    _ensureDefaultData();
+    return List.unmodifiable(_mockBankSyncConnections);
+  }
+
+  Future<void> syncBankBalances() async {
+    _ensureDefaultData();
+    for (int i = 0; i < _mockBankSyncConnections.length; i++) {
+      final conn = _mockBankSyncConnections[i];
+      _mockBankSyncConnections[i] = conn.copyWith(
+        lastSyncedAt: DateTime.now(),
+        status: BankSyncStatus.synced,
+      );
+
+      // Propagate live balance to corresponding local account
+      final accIdx = _mockAccounts.indexWhere((a) => a.accountId == conn.linkedLocalAccountId);
+      if (accIdx != -1) {
+        _mockAccounts[accIdx] = _mockAccounts[accIdx].copyWith(
+          nativeBalance: conn.currentBalanceZar,
+        );
+      }
+    }
+
+    // Trigger statement reconciliation against newly updated bank feed
+    await runReconciliationEngine();
+  }
+
+  // --- 7. Legacy & Estate Vault ---
+
+  LegacyVaultConfig getLegacyVaultConfig() {
+    return _legacyVaultConfig;
+  }
+
+  void saveLegacyVaultConfig(LegacyVaultConfig config) {
+    _legacyVaultConfig = config;
+  }
+
+  List<TrustedContact> getTrustedContacts() {
+    _ensureDefaultData();
+    return List.unmodifiable(_mockTrustedContacts);
+  }
+
+  Future<void> saveTrustedContact(TrustedContact contact) async {
+    _ensureDefaultData();
+    final idx = _mockTrustedContacts.indexWhere((c) => c.id == contact.id);
+    if (idx != -1) {
+      _mockTrustedContacts[idx] = contact;
+    } else {
+      _mockTrustedContacts.add(contact);
+    }
+  }
+
+  Future<void> deleteTrustedContact(String contactId) async {
+    _ensureDefaultData();
+    _mockTrustedContacts.removeWhere((c) => c.id == contactId);
+  }
+
+  List<VaultAuditLog> getVaultAuditLogs() {
+    _ensureDefaultData();
+    return List.unmodifiable(_mockVaultAuditLogs);
+  }
+
+  void logVaultAction(String action, String actor, String details) {
+    _ensureDefaultData();
+    _mockVaultAuditLogs.insert(
+      0,
+      VaultAuditLog(
+        id: 'LOG_${DateTime.now().millisecondsSinceEpoch}',
+        timestamp: DateTime.now(),
+        action: action,
+        actorName: actor,
+        details: details,
+      ),
+    );
+  }
+
+  Map<String, dynamic> generateEstateDossier() {
+    _ensureDefaultData();
+    logVaultAction('ESTATE_DOSSIER_VIEWED', 'Shingirai Chapwanya', 'Generated Executive Legacy & Estate Dossier summary.');
+
+    final includedAssets = _mockAssets.where((a) => _legacyVaultConfig.includedAssetIds.contains(a.id)).toList();
+    final includedAccounts = _mockAccounts.where((a) => _legacyVaultConfig.includedAccountIds.contains(a.accountId)).toList();
+
+    double totalAssetValuation = 0.0;
+    for (final a in includedAssets) {
+      totalAssetValuation += a.currentValueZar * (a.myOwnershipPercentage / 100.0);
+    }
+
+    double totalCashLiquidity = 0.0;
+    for (final acc in includedAccounts) {
+      totalCashLiquidity += acc.nativeBalance;
+    }
+
+    final totalDebts = getTotalDebtsOwedByMeZar();
+
+    return {
+      'generatedAt': DateTime.now().toIso8601String(),
+      'principalName': 'Shingirai Chapwanya',
+      'totalEstateValuationZar': totalAssetValuation + totalCashLiquidity - totalDebts,
+      'assetHoldingsValuationZar': totalAssetValuation,
+      'liquidCashValuationZar': totalCashLiquidity,
+      'outstandingDebtsZar': totalDebts,
+      'includedAssetsCount': includedAssets.length,
+      'assets': includedAssets.map((a) => a.toJson()).toList(),
+      'accounts': includedAccounts.map((a) => a.toJson()).toList(),
+      'trustedContacts': _mockTrustedContacts.map((c) => c.toJson()).toList(),
+      'executorDirectives': _legacyVaultConfig.executorDirectives,
+      'emergencyTrusteeNotes': _legacyVaultConfig.emergencyTrusteeNotes,
+    };
+  }
 }
+

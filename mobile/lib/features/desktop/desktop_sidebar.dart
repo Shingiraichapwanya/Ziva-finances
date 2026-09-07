@@ -249,14 +249,38 @@ class DesktopSidebar extends StatelessWidget {
                     },
                   ),
 
-                  // 7. SYSTEM SETTINGS & PROOF OF DEPLOYMENT
+                  // 7. AUTO PILOT INTELLIGENCE (PHASE FOUR)
+                  _buildSidebarNavButton(
+                    icon: Icons.auto_mode_rounded,
+                    label: 'Auto Pilot & Recon',
+                    badge: 'AUTO',
+                    isActive: currentTabIndex == 6,
+                    onTap: () {
+                      setUrlAnchor('#autopilot');
+                      onTabSelected(6);
+                    },
+                  ),
+
+                  // 8. LEGACY & ESTATE VAULT (PHASE FOUR)
+                  _buildSidebarNavButton(
+                    icon: Icons.family_restroom_rounded,
+                    label: 'Legacy & Estate Vault',
+                    badge: 'VAULT',
+                    isActive: currentTabIndex == 7,
+                    onTap: () {
+                      setUrlAnchor('#vault');
+                      onTabSelected(7);
+                    },
+                  ),
+
+                  // 9. SYSTEM SETTINGS & PROOF OF DEPLOYMENT
                   _buildSidebarNavButton(
                     icon: Icons.tune_rounded,
                     label: 'System Settings & OTA',
-                    isActive: currentTabIndex == 6,
+                    isActive: currentTabIndex == 8,
                     onTap: () {
                       setUrlAnchor('#settings');
-                      onTabSelected(6);
+                      onTabSelected(8);
                     },
                   ),
                 ],

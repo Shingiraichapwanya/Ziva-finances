@@ -14,9 +14,11 @@ import '../search/global_search_dialog.dart';
 import '../settings/developer_settings_screen.dart';
 import 'widgets/analytics_hub_section.dart';
 import 'widgets/asset_summary_widget.dart';
+import 'widgets/autopilot_snapshot_widget.dart';
 import 'widgets/debt_credit_summary_widget.dart';
 import 'widgets/envelope_overview_section.dart';
 import 'widgets/next_best_move_widget.dart';
+import 'widgets/predictive_cashflow_alert_card.dart';
 import 'widgets/scenario_snapshot_widget.dart';
 import 'widgets/tax_reserve_status_widget.dart';
 
@@ -26,6 +28,8 @@ class DashboardScreen extends StatefulWidget {
   final VoidCallback? onNavigateToScenarios;
   final VoidCallback? onNavigateToTax;
   final VoidCallback? onNavigateToGoals;
+  final VoidCallback? onNavigateToAutoPilot;
+  final VoidCallback? onNavigateToVault;
   final VoidCallback? onNavigateToSettings;
   final bool showSidebar;
   final String selectedCurrency;
@@ -37,6 +41,8 @@ class DashboardScreen extends StatefulWidget {
     this.onNavigateToScenarios,
     this.onNavigateToTax,
     this.onNavigateToGoals,
+    this.onNavigateToAutoPilot,
+    this.onNavigateToVault,
     this.onNavigateToSettings,
     this.showSidebar = true,
     this.selectedCurrency = 'ZAR',
@@ -572,6 +578,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 },
               ),
 
+              const SizedBox(height: 20),
+
+              // Early Warning Predictive Cash Flow Radar
+              PredictiveCashFlowAlertCard(
+                onOpenAutoPilot: () {
+                  if (widget.onNavigateToAutoPilot != null) widget.onNavigateToAutoPilot!();
+                },
+              ),
+
+              const SizedBox(height: 20),
+
+              // Auto Pilot Radar & Ingestion Snapshot
+              AutoPilotSnapshotWidget(
+                onOpenAutoPilot: () {
+                  if (widget.onNavigateToAutoPilot != null) widget.onNavigateToAutoPilot!();
+                },
+              ),
+
               const SizedBox(height: 24),
 
               // Recent Transactions Header
@@ -1032,6 +1056,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   },
                 ),
 
+                const SizedBox(height: 20),
+
+                // 3.8. EARLY WARNING PREDICTIVE CASH FLOW RADAR
+                PredictiveCashFlowAlertCard(
+                  onOpenAutoPilot: () {
+                    if (widget.onNavigateToAutoPilot != null) widget.onNavigateToAutoPilot!();
+                  },
+                ),
+
                 const SizedBox(height: 28),
 
                 // -------------------------------------------------------
@@ -1334,8 +1367,41 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         ),
                       ],
                     ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: () {
+                              if (widget.onNavigateToAutoPilot != null) widget.onNavigateToAutoPilot!();
+                            },
+                            icon: const Icon(Icons.auto_mode_rounded, size: 14, color: ZivaTheme.gold400),
+                            label: const Text('Auto Pilot', style: TextStyle(color: ZivaTheme.textPrimary, fontSize: 11)),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: () {
+                              if (widget.onNavigateToVault != null) widget.onNavigateToVault!();
+                            },
+                            icon: const Icon(Icons.family_restroom_rounded, size: 14, color: ZivaTheme.cyan400),
+                            label: const Text('Vault', style: TextStyle(color: ZivaTheme.textPrimary, fontSize: 11)),
+                          ),
+                        ),
+                      ],
+                    ),
                   ],
                 ),
+              ),
+
+              const SizedBox(height: 20),
+
+              // Auto Pilot Radar Snapshot Widget
+              AutoPilotSnapshotWidget(
+                onOpenAutoPilot: () {
+                  if (widget.onNavigateToAutoPilot != null) widget.onNavigateToAutoPilot!();
+                },
               ),
 
               const SizedBox(height: 20),

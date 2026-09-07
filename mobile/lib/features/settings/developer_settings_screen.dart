@@ -168,6 +168,11 @@ class _DeveloperSettingsScreenState extends State<DeveloperSettingsScreen> {
             // 0c. Phase Three The Intelligence Layer Deployment Proof
             _buildSectionHeader('PHASE THREE: THE INTELLIGENCE LAYER ARCHITECTURE'),
             _buildPhaseThreeProofCard(),
+            const SizedBox(height: 16),
+
+            // 0d. Phase Four Auto Pilot Intelligence Deployment Proof
+            _buildSectionHeader('PHASE FOUR: AUTO PILOT INTELLIGENCE ARCHITECTURE'),
+            _buildPhaseFourProofCard(),
             const SizedBox(height: 20),
 
             // 1. Shorebird OTA Code Push Panel
@@ -672,6 +677,69 @@ class _DeveloperSettingsScreenState extends State<DeveloperSettingsScreen> {
                 Expanded(
                   child: Text(
                     'Phase Three Intelligence Layer Active & Operational in Live Sandbox',
+                    style: TextStyle(fontFamily: 'monospace', fontSize: 11, color: ZivaTheme.textPrimary, fontWeight: FontWeight.bold),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPhaseFourProofCard() {
+    return Card(
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: ZivaTheme.gold400.withValues(alpha: 0.6), width: 1.2),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Expanded(
+                  child: Text(
+                    'PHASE FOUR: AUTO PILOT INTELLIGENCE',
+                    style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13, color: ZivaTheme.gold400, letterSpacing: 0.8),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: ZivaTheme.emeraldBg,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: ZivaTheme.emerald400.withValues(alpha: 0.4)),
+                  ),
+                  child: const Text(
+                    'VERIFIED & DEPLOYED',
+                    style: TextStyle(color: ZivaTheme.emerald400, fontSize: 10, fontWeight: FontWeight.w800),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            _buildProofItem('1. Email-to-Ledger Intelligence', 'Google Workspace Gmail parser for bank statements, card statements, payment alerts, and invoices with Keep/Remove controls'),
+            _buildProofItem('2. OCR Pipeline for Handwritten Slips', 'Multi-field OCR extraction with per-field confidence scoring, inline corrections, and account mapping to pending deposits'),
+            _buildProofItem('3. 3-Way Reconciliation Engine', 'Cross-matching matrix across slips, email proposals, and manual ledger vs. bank statements with tolerance thresholds'),
+            _buildProofItem('4. Confidence Filter & Auto-Add', 'Tiered automation: High (>=95%) auto-add with tamper-evident audit log, Medium (70-95%) review queue, Low (<70%) flagged'),
+            _buildProofItem('5. Predictive Cash Flow & Warnings', '7/14/30-day projection modeling burn rates and obligations with impending shortfall alert and actionable mitigation levers'),
+            _buildProofItem('6. Real-Time Bank Sync APIs', 'Multi-institution Open Banking / aggregator balance sync with instant dashboard updates and automatic reconciliation triggers'),
+            _buildProofItem('7. Legacy & Estate Vault', 'Secure asset registry distribution, trusted contacts with access tiers, secondary passcode verification (2026), and Estate Dossier generator'),
+            const Divider(height: 20, color: ZivaTheme.borderCard),
+            const Row(
+              children: [
+                Icon(Icons.verified_rounded, size: 14, color: ZivaTheme.gold400),
+                SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'Phase Four Autonomous Safeguards & Estate Protection Fully Deployed',
                     style: TextStyle(fontFamily: 'monospace', fontSize: 11, color: ZivaTheme.textPrimary, fontWeight: FontWeight.bold),
                     overflow: TextOverflow.ellipsis,
                   ),

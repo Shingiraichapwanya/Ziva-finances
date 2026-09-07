@@ -10,11 +10,13 @@ import 'features/auth/privacy_shield.dart';
 import 'features/common/quick_add_fab.dart';
 import 'features/dashboard/dashboard_screen.dart';
 import 'features/desktop/desktop_sidebar.dart';
+import 'features/autopilot/auto_pilot_screen.dart';
 import 'features/insights/strategic_insights_screen.dart';
 import 'features/ledger/ledger_screen.dart';
 import 'features/scenarios/scenario_planner_screen.dart';
 import 'features/settings/developer_settings_screen.dart';
 import 'features/tax/tax_automation_screen.dart';
+import 'features/vault/legacy_vault_screen.dart';
 import 'services/biometric_service.dart';
 import 'services/sync_engine.dart';
 
@@ -98,8 +100,12 @@ class _MainNavigationShellState extends State<MainNavigationShell> with WidgetsB
       _currentTabIndex = 4;
     } else if (anchor.contains('goal') || anchor.contains('insight') || anchor.contains('cfo')) {
       _currentTabIndex = 5;
-    } else if (anchor.contains('settings') || anchor.contains('dev')) {
+    } else if (anchor.contains('autopilot') || anchor.contains('recon')) {
       _currentTabIndex = 6;
+    } else if (anchor.contains('vault') || anchor.contains('estate') || anchor.contains('legacy')) {
+      _currentTabIndex = 7;
+    } else if (anchor.contains('settings') || anchor.contains('dev')) {
+      _currentTabIndex = 8;
     } else {
       _currentTabIndex = 0;
     }
@@ -121,6 +127,10 @@ class _MainNavigationShellState extends State<MainNavigationShell> with WidgetsB
       } else if (index == 5) {
         setUrlAnchor('goals');
       } else if (index == 6) {
+        setUrlAnchor('autopilot');
+      } else if (index == 7) {
+        setUrlAnchor('vault');
+      } else if (index == 8) {
         setUrlAnchor('settings');
       }
     });
@@ -248,7 +258,9 @@ class _MainNavigationShellState extends State<MainNavigationShell> with WidgetsB
                           onNavigateToScenarios: () => _selectTab(3),
                           onNavigateToTax: () => _selectTab(4),
                           onNavigateToGoals: () => _selectTab(5),
-                          onNavigateToSettings: () => _selectTab(6),
+                          onNavigateToAutoPilot: () => _selectTab(6),
+                          onNavigateToVault: () => _selectTab(7),
+                          onNavigateToSettings: () => _selectTab(8),
                         ),
                         AssetRegistryScreen(
                           onBackToDashboard: () => _selectTab(0),
@@ -257,6 +269,8 @@ class _MainNavigationShellState extends State<MainNavigationShell> with WidgetsB
                         const ScenarioPlannerScreen(),
                         const TaxAutomationScreen(),
                         const StrategicInsightsScreen(),
+                        const AutoPilotScreen(),
+                        const LegacyVaultScreen(),
                         const DeveloperSettingsScreen(),
                       ],
                     ),
@@ -272,7 +286,7 @@ class _MainNavigationShellState extends State<MainNavigationShell> with WidgetsB
                             currentTabIndex: _currentTabIndex,
                             selectedCurrency: _selectedCurrency,
                             onCurrencyChanged: (curr) => setState(() => _selectedCurrency = curr),
-                            onSecretAdminTrigger: () => _selectTab(6),
+                            onSecretAdminTrigger: () => _selectTab(8),
                             onTabSelected: _selectTab,
                           ),
                           Expanded(child: mainContent),
@@ -291,10 +305,11 @@ class _MainNavigationShellState extends State<MainNavigationShell> with WidgetsB
                           border: Border(top: BorderSide(color: ZivaTheme.borderCard)),
                         ),
                         child: NavigationBar(
-                          selectedIndex: _currentTabIndex,
+                          selectedIndex: _currentTabIndex.clamp(0, 8),
                           backgroundColor: ZivaTheme.bgSurface,
                           indicatorColor: ZivaTheme.gold500.withValues(alpha: 0.2),
                           onDestinationSelected: _selectTab,
+                          labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
                           destinations: [
                             const NavigationDestination(
                               icon: Icon(Icons.dashboard_outlined, color: ZivaTheme.textMuted),
@@ -336,6 +351,16 @@ class _MainNavigationShellState extends State<MainNavigationShell> with WidgetsB
                               icon: Icon(Icons.psychology_outlined, color: ZivaTheme.textMuted),
                               selectedIcon: Icon(Icons.psychology_rounded, color: ZivaTheme.gold400),
                               label: 'AI CFO',
+                            ),
+                            const NavigationDestination(
+                              icon: Icon(Icons.auto_mode_outlined, color: ZivaTheme.textMuted),
+                              selectedIcon: Icon(Icons.auto_mode_rounded, color: ZivaTheme.gold400),
+                              label: 'Auto',
+                            ),
+                            const NavigationDestination(
+                              icon: Icon(Icons.family_restroom_outlined, color: ZivaTheme.textMuted),
+                              selectedIcon: Icon(Icons.family_restroom_rounded, color: ZivaTheme.gold400),
+                              label: 'Vault',
                             ),
                             const NavigationDestination(
                               icon: Icon(Icons.tune_outlined, color: ZivaTheme.textMuted),

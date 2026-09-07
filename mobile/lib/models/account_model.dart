@@ -70,4 +70,36 @@ class AccountModel {
       'is_active': isActive ? 1 : 0,
     };
   }
+
+  Map<String, dynamic> toJson() => toSqliteMap();
+
+  AccountModel copyWith({
+    String? accountId,
+    String? accountName,
+    String? financialInstitution,
+    String? countryCode,
+    String? primaryCurrency,
+    String? cashFlowTier,
+    String? accountType,
+    bool? isVaultLocked,
+    int? withdrawalNoticeDays,
+    String? accountNumberMasked,
+    double? nativeBalance,
+    bool? isActive,
+  }) {
+    return AccountModel(
+      accountId: accountId ?? this.accountId,
+      accountName: accountName ?? this.accountName,
+      financialInstitution: financialInstitution ?? this.financialInstitution,
+      countryCode: countryCode ?? this.countryCode,
+      primaryCurrency: primaryCurrency ?? this.primaryCurrency,
+      cashFlowTier: cashFlowTier ?? this.cashFlowTier,
+      accountType: accountType ?? this.accountType,
+      isVaultLocked: isVaultLocked ?? this.isVaultLocked,
+      withdrawalNoticeDays: withdrawalNoticeDays ?? this.withdrawalNoticeDays,
+      accountNumberMasked: accountNumberMasked ?? this.accountNumberMasked,
+      nativeBalance: nativeBalance ?? this.nativeBalance,
+      isActive: isActive ?? this.isActive,
+    );
+  }
 }

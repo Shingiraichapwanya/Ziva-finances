@@ -137,6 +137,49 @@ class QuickAddFab extends StatelessWidget {
                 onNavigateToTab?.call(5); // Goals tab
               },
             ),
+            const SizedBox(height: 10),
+
+            // Option 7: Upload Deposit Slip (OCR)
+            _buildOptionTile(
+              context: ctx,
+              title: 'Scan Deposit Slip (OCR)',
+              subtitle: 'Handwritten bank deposit slip scanner & field extractor',
+              icon: Icons.document_scanner_rounded,
+              color: Colors.amberAccent,
+              onTap: () {
+                Navigator.pop(ctx);
+                onNavigateToTab?.call(6); // Auto Pilot tab
+              },
+            ),
+            const SizedBox(height: 10),
+
+            // Option 8: Scan Workspace Emails
+            _buildOptionTile(
+              context: ctx,
+              title: 'Scan Workspace Emails',
+              subtitle: 'Trigger real-time Gmail financial document scan & ingestion',
+              icon: Icons.mark_email_read_rounded,
+              color: ZivaTheme.cyan400,
+              onTap: () async {
+                Navigator.pop(ctx);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Scanning Google Workspace emails for financial docs...'),
+                    backgroundColor: ZivaTheme.bgCard,
+                  ),
+                );
+                await SqliteService.instance.scanGoogleWorkspaceEmails(manualTrigger: true);
+                onDataMutated?.call();
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Workspace email scan complete. Transactions ingested!'),
+                      backgroundColor: ZivaTheme.emerald400,
+                    ),
+                  );
+                }
+              },
+            ),
           ],
         ),
       ),
