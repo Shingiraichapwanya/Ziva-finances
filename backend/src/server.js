@@ -24,7 +24,9 @@ import {
   getDebtBalances,
   insertDebt,
   settleDebt,
-  deleteDebt
+  deleteDebt,
+  verifyBigQueryConnectivity,
+  getTroubleshootingGuidance
 } from './bigquery.js';
 import { getCopilotInsights, chatWithCopilot } from './copilot.js';
 
@@ -34,15 +36,43 @@ const PORT = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json());
 
-// Health & Status endpoint
-app.get('/api/health', (req, res) => {
-  res.json({
-    status: 'ONLINE',
-    project: BQ_CONFIG.projectId,
-    dataset: BQ_CONFIG.datasetId,
-    location: BQ_CONFIG.location,
-    timestamp: new Date().toISOString()
-  });
+// Health & Status endpoint with rich BigQuery connectivity diagnostics
+app.get('/api/health', async (req, res) => {
+  try {
+    const forceCheck = req.query.force === 'true';
+    const state = await verifyBigQueryConnectivity({ forceCheck });
+    res.json(state);
+  } catch (error) {
+    res.status(500).json({
+      status: 'OFFLINE',
+      connected: false,
+      error: {
+        message: error.message,
+        troubleshooting: getTroubleshootingGuidance(error)
+      }
+    });
+  }
+});
+
+// Explicit connection test route - forces live probe to BigQuery
+app.all('/api/connection-test', async (req, res) => {
+  try {
+    const state = await verifyBigQueryConnectivity({ forceCheck: true });
+    if (state.connected) {
+      res.json(state);
+    } else {
+      res.status(503).json(state);
+    }
+  } catch (error) {
+    res.status(503).json({
+      status: 'OFFLINE',
+      connected: false,
+      error: {
+        message: error.message,
+        troubleshooting: getTroubleshootingGuidance(error)
+      }
+    });
+  }
 });
 
 // Live BigQuery test query execution endpoint
@@ -282,10 +312,14 @@ app.get('/api/analytics/summary', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`=======================================================`);
   console.log(` Ziva Finance BigQuery API Server running on port ${PORT}`);
   console.log(` Connected to GCP Project: ${BQ_CONFIG.projectId}`);
   console.log(` Dataset: ${BQ_CONFIG.datasetId} (${BQ_CONFIG.location})`);
   console.log(`=======================================================`);
+  
+  // Explicit startup connectivity test
+  console.log('[Startup Check] Verifying BigQuery warehouse connectivity...');
+  await verifyBigQueryConnectivity({ forceCheck: true });
 });

@@ -38,10 +38,14 @@ class _LedgerScreenState extends State<LedgerScreen> with SingleTickerProviderSt
   bool _isLoadingDebts = true;
   String _debtStatusFilter = 'ALL'; // ALL, ACTIVE, OVERDUE, PAID_OFF
 
-  // BigQuery Connection State
+  // BigQuery Connection State & Diagnostic Telemetry
   bool _isBigQueryConnected = false;
   bool _isCheckingConnection = false;
   String? _connectionError;
+  Map<String, dynamic>? _connectionDiagnostics;
+  bool _showDiagnosticDetails = false;
+  int? _connectionLatencyMs;
+  String? _activeAuthMode;
 
   @override
   void initState() {
@@ -60,22 +64,50 @@ class _LedgerScreenState extends State<LedgerScreen> with SingleTickerProviderSt
     super.dispose();
   }
 
-  Future<void> _checkBigQueryConnection() async {
+  Future<void> _checkBigQueryConnection({bool force = false}) async {
     setState(() => _isCheckingConnection = true);
     try {
-      final health = await ApiService().checkHealth();
+      final health = await ApiService().checkHealth(force: force);
+      final isOnline = (health['connected'] == true) ||
+          (health['status'] == 'ONLINE') ||
+          (health['status'] == 'ok');
+
       if (mounted) {
         setState(() {
-          _isBigQueryConnected = health['status'] == 'ONLINE' || health['status'] == 'ok';
-          _connectionError = null;
+          _isBigQueryConnected = isOnline;
+          _connectionLatencyMs = health['latencyMs'] is int ? health['latencyMs'] as int : null;
+          _activeAuthMode = health['authMode']?.toString();
+
+          if (isOnline) {
+            _connectionError = null;
+            _connectionDiagnostics = null;
+            _showDiagnosticDetails = false;
+          } else {
+            final err = health['error'] is Map<String, dynamic> ? health['error'] as Map<String, dynamic> : null;
+            _connectionDiagnostics = err;
+            _connectionError = err?['message']?.toString() ?? 'BigQuery warehouse reported offline status';
+            debugPrint('====================================================');
+            debugPrint('[BigQuery Connection Alert] Status: OFFLINE');
+            debugPrint('Message: $_connectionError');
+            debugPrint('Code: ${err?['code']}');
+            debugPrint('Troubleshooting: ${err?['troubleshooting']}');
+            debugPrint('====================================================');
+          }
           _isCheckingConnection = false;
         });
       }
     } catch (e) {
+      debugPrint('[BigQuery Connection Error] Health check probe failed: $e');
       if (mounted) {
         setState(() {
           _isBigQueryConnected = false;
           _connectionError = e.toString();
+          _connectionDiagnostics = {
+            'code': 'PROXY_UNREACHABLE',
+            'message': e.toString(),
+            'troubleshooting':
+                'Cannot reach the BigQuery backend server on port 3001. Ensure the backend Express process is running: cd backend && npm start (or node src/server.js).',
+          };
           _isCheckingConnection = false;
         });
       }
@@ -916,7 +948,7 @@ class _LedgerScreenState extends State<LedgerScreen> with SingleTickerProviderSt
     if (_isCheckingConnection) {
       return Container(
         width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         color: ZivaTheme.bgCard,
         child: const Row(
           children: [
@@ -928,7 +960,7 @@ class _LedgerScreenState extends State<LedgerScreen> with SingleTickerProviderSt
             SizedBox(width: 10),
             Expanded(
               child: Text(
-                'Verifying connection to BigQuery (budget-tracker-507418)...',
+                'Probing Google Cloud BigQuery (budget-tracker-507418)...',
                 style: TextStyle(color: ZivaTheme.textMuted, fontSize: 12),
               ),
             ),
@@ -938,38 +970,157 @@ class _LedgerScreenState extends State<LedgerScreen> with SingleTickerProviderSt
     }
 
     if (!_isBigQueryConnected) {
+      final errorCode = _connectionDiagnostics?['code']?.toString() ?? 'CONNECTION_FAILED';
+      final guidance = _connectionDiagnostics?['troubleshooting']?.toString() ??
+          'Verify Google Cloud Application Default Credentials (ADC) or check BigQuery IAM permissions.';
+      final rawMessage = _connectionDiagnostics?['message']?.toString() ?? _connectionError ?? 'Unknown error';
+
       return Container(
         width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        color: ZivaTheme.rose500.withValues(alpha: 0.15),
-        child: Row(
+        margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: ZivaTheme.bgSurface,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: ZivaTheme.rose500.withValues(alpha: 0.35)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.3),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Icon(Icons.cloud_off_rounded, color: ZivaTheme.rose400, size: 18),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+            // Header Bar
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: ZivaTheme.rose500.withValues(alpha: 0.15),
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(9)),
+                border: Border(bottom: BorderSide(color: ZivaTheme.rose500.withValues(alpha: 0.2))),
+              ),
+              child: Row(
                 children: [
-                  const Text(
-                    'BigQuery Warehouse Offline / Unreachable',
-                    style: TextStyle(color: ZivaTheme.rose400, fontSize: 12, fontWeight: FontWeight.bold),
+                  const Icon(Icons.cloud_off_rounded, color: ZivaTheme.rose400, size: 18),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const Text(
+                              'BigQuery Connection Action Required',
+                              style: TextStyle(color: ZivaTheme.rose400, fontSize: 13, fontWeight: FontWeight.bold),
+                            ),
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: ZivaTheme.rose500.withValues(alpha: 0.25),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                errorCode,
+                                style: const TextStyle(color: ZivaTheme.rose400, fontSize: 10, fontWeight: FontWeight.w700, fontFamily: 'monospace'),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 2),
+                        const Text(
+                          'Target: budget-tracker-507418 • personal_finance (africa-south1)',
+                          style: TextStyle(color: ZivaTheme.textMuted, fontSize: 11),
+                        ),
+                      ],
+                    ),
                   ),
-                  Text(
-                    _connectionError ?? 'Cannot reach backend proxy on port 3001. Write-back blocked.',
-                    style: const TextStyle(color: ZivaTheme.textMuted, fontSize: 11),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                  ElevatedButton.icon(
+                    onPressed: () => _checkBigQueryConnection(force: true),
+                    icon: const Icon(Icons.refresh_rounded, size: 14),
+                    label: const Text('RETRY', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: ZivaTheme.rose500,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      visualDensity: VisualDensity.compact,
+                    ),
                   ),
                 ],
               ),
             ),
-            TextButton(
-              onPressed: _onRefresh,
-              style: TextButton.styleFrom(
-                foregroundColor: ZivaTheme.rose400,
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+
+            // Diagnostic Guidance Body
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.lightbulb_outline_rounded, size: 16, color: ZivaTheme.gold400),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          guidance,
+                          style: const TextStyle(color: ZivaTheme.textPrimary, fontSize: 12, height: 1.35),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  // Expandable Technical Details
+                  InkWell(
+                    onTap: () {
+                      setState(() {
+                        _showDiagnosticDetails = !_showDiagnosticDetails;
+                      });
+                    },
+                    borderRadius: BorderRadius.circular(4),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Row(
+                        children: [
+                          Icon(
+                            _showDiagnosticDetails ? Icons.expand_less_rounded : Icons.expand_more_rounded,
+                            size: 16,
+                            color: ZivaTheme.textMuted,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            _showDiagnosticDetails ? 'Hide technical error details' : 'Show technical error details',
+                            style: const TextStyle(color: ZivaTheme.textMuted, fontSize: 11, decoration: TextDecoration.underline),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  if (_showDiagnosticDetails) ...[
+                    const SizedBox(height: 6),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: ZivaTheme.bgCore,
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: ZivaTheme.borderSubtle),
+                      ),
+                      child: SelectableText(
+                        rawMessage,
+                        style: const TextStyle(
+                          fontFamily: 'monospace',
+                          fontSize: 11,
+                          color: ZivaTheme.textSecondary,
+                          height: 1.3,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
               ),
-              child: const Text('RETRY', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
             ),
           ],
         ),
@@ -978,7 +1129,7 @@ class _LedgerScreenState extends State<LedgerScreen> with SingleTickerProviderSt
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
       decoration: BoxDecoration(
         color: ZivaTheme.emerald500.withValues(alpha: 0.08),
         border: Border(bottom: BorderSide(color: ZivaTheme.emerald500.withValues(alpha: 0.2))),
@@ -994,18 +1145,43 @@ class _LedgerScreenState extends State<LedgerScreen> with SingleTickerProviderSt
             ),
           ),
           const SizedBox(width: 8),
-          const Expanded(
-            child: Text(
-              'BigQuery Write-Back Active • budget-tracker-507418.personal_finance (africa-south1)',
-              style: TextStyle(color: ZivaTheme.emerald400, fontSize: 11, fontWeight: FontWeight.w600),
+          Expanded(
+            child: Row(
+              children: [
+                const Text(
+                  'BigQuery Write-Back Active • budget-tracker-507418.personal_finance (africa-south1)',
+                  style: TextStyle(color: ZivaTheme.emerald400, fontSize: 11, fontWeight: FontWeight.w600),
+                ),
+                if (_connectionLatencyMs != null) ...[
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: ZivaTheme.emerald500.withValues(alpha: 0.18),
+                      borderRadius: BorderRadius.circular(3),
+                    ),
+                    child: Text(
+                      '${_connectionLatencyMs}ms',
+                      style: const TextStyle(color: ZivaTheme.emerald400, fontSize: 10, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ],
+                if (_activeAuthMode != null) ...[
+                  const SizedBox(width: 6),
+                  Text(
+                    '• $_activeAuthMode',
+                    style: const TextStyle(color: ZivaTheme.textMuted, fontSize: 10),
+                  ),
+                ],
+              ],
             ),
           ),
           IconButton(
             icon: const Icon(Icons.refresh_rounded, size: 14, color: ZivaTheme.emerald400),
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(),
-            tooltip: 'Refresh BigQuery Cache',
-            onPressed: _onRefresh,
+            tooltip: 'Re-verify BigQuery Status',
+            onPressed: () => _checkBigQueryConnection(force: true),
           ),
         ],
       ),

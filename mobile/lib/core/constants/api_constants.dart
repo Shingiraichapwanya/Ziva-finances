@@ -33,4 +33,5 @@ class ApiConstants {
   static const String analyticsSummaryEndpoint = '/api/analytics/summary';
   static const String copilotChatEndpoint = '/api/copilot/chat';
   static const String testQueryEndpoint = '/api/test-query';
+  static const String connectionTestEndpoint = '/api/connection-test';
 }

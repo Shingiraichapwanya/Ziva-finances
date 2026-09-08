@@ -5,6 +5,7 @@
  */
 
 import { BigQuery } from '@google-cloud/bigquery';
+import { OAuth2Client } from 'google-auth-library';
 import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
@@ -14,28 +15,189 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 export const BQ_CONFIG = {
-  projectId: 'budget-tracker-507418',
-  datasetId: 'personal_finance',
-  location: 'africa-south1',
+  projectId: process.env.GCP_PROJECT_ID || process.env.BIGQUERY_PROJECT_ID || 'budget-tracker-507418',
+  datasetId: process.env.BIGQUERY_DATASET || 'personal_finance',
+  location: process.env.BIGQUERY_LOCATION || 'africa-south1',
   defaultTimezone: 'Africa/Johannesburg'
 };
 
-const bqClient = new BigQuery({
-  projectId: BQ_CONFIG.projectId,
-  location: BQ_CONFIG.location
-});
+let activeClientInstance = null;
+let activeAuthMode = 'UNKNOWN';
+let lastTokenRefresh = 0;
+let cachedOAuthClient = null;
+let cachedConnectionState = null;
+
+/**
+ * Diagnostic guidance generator based on exact Google Cloud errors
+ */
+export function getTroubleshootingGuidance(err) {
+  const msg = (err?.message || '').toLowerCase();
+  const code = err?.code;
+
+  if (msg.includes('could not load the default credentials') || msg.includes('no credentialed accounts') || msg.includes('invalid_grant')) {
+    return "Google Cloud Application Default Credentials (ADC) missing or expired. Run 'gcloud auth application-default login' in your shell, or run 'gcloud auth login', or supply a service account key JSON via GOOGLE_APPLICATION_CREDENTIALS.";
+  }
+  if (msg.includes('access denied') || msg.includes('permission') || code === 403) {
+    return "Google Cloud IAM permission denied. Ensure the active account or service account has 'roles/bigquery.dataEditor' and 'roles/bigquery.jobUser' on project 'budget-tracker-507418'.";
+  }
+  if (msg.includes('not found: dataset') || (msg.includes('dataset') && msg.includes('not found')) || code === 404) {
+    return "BigQuery dataset 'personal_finance' was not found in project 'budget-tracker-507418' (location 'africa-south1'). Verify the dataset exists in that region.";
+  }
+  if (msg.includes('econnrefused') || msg.includes('enotfound') || msg.includes('timeout') || msg.includes('fetch failed')) {
+    return "Network connectivity failure reaching Google Cloud BigQuery API (bigquery.googleapis.com). Check internet connection and outbound access.";
+  }
+  return "Review the exact error details and Google Cloud Console for project budget-tracker-507418.";
+}
+
+/**
+ * Multi-tier credential resolver
+ */
+export function resolveAuthDetails() {
+  if (process.env.GOOGLE_APPLICATION_CREDENTIALS && fs.existsSync(process.env.GOOGLE_APPLICATION_CREDENTIALS)) {
+    return { mode: 'GOOGLE_APPLICATION_CREDENTIALS', keyFile: process.env.GOOGLE_APPLICATION_CREDENTIALS };
+  }
+
+  const candidateKeyPaths = [
+    path.resolve(__dirname, '../service-account.json'),
+    path.resolve(__dirname, '../../service-account.json'),
+    path.resolve(__dirname, '../../mobile/assets/credentials/mobile-bigquery-client.json'),
+    path.resolve(__dirname, '../../mobile/assets/credentials/service-account.json')
+  ];
+
+  for (const p of candidateKeyPaths) {
+    if (fs.existsSync(p)) {
+      try {
+        const content = JSON.parse(fs.readFileSync(p, 'utf8'));
+        if (content.private_key) {
+          return { mode: 'SERVICE_ACCOUNT_KEY_FILE', keyFile: p };
+        }
+      } catch (_) {}
+    }
+  }
+
+  try {
+    const token = execSync('gcloud auth print-access-token', { encoding: 'utf8', timeout: 5000, stdio: ['pipe', 'pipe', 'ignore'] }).trim();
+    if (token && token.startsWith('ya29.')) {
+      return { mode: 'OAUTH2_GCLOUD_TOKEN', token };
+    }
+  } catch (_) {}
+
+  return { mode: 'APPLICATION_DEFAULT_CREDENTIALS' };
+}
+
+/**
+ * Returns or instantiates the authoritative BigQuery client
+ */
+export function getBigQueryClient(forceRefresh = false) {
+  const now = Date.now();
+  if (activeClientInstance && !forceRefresh && (now - lastTokenRefresh < 45 * 60 * 1000)) {
+    return { client: activeClientInstance, mode: activeAuthMode };
+  }
+
+  const authDetails = resolveAuthDetails();
+  activeAuthMode = authDetails.mode;
+
+  if (authDetails.mode === 'SERVICE_ACCOUNT_KEY_FILE' || authDetails.mode === 'GOOGLE_APPLICATION_CREDENTIALS') {
+    activeClientInstance = new BigQuery({
+      projectId: BQ_CONFIG.projectId,
+      location: BQ_CONFIG.location,
+      keyFilename: authDetails.keyFile
+    });
+  } else if (authDetails.mode === 'OAUTH2_GCLOUD_TOKEN') {
+    cachedOAuthClient = new OAuth2Client();
+    cachedOAuthClient.setCredentials({ access_token: authDetails.token });
+    activeClientInstance = new BigQuery({
+      projectId: BQ_CONFIG.projectId,
+      location: BQ_CONFIG.location,
+      authClient: cachedOAuthClient
+    });
+    lastTokenRefresh = now;
+  } else {
+    activeClientInstance = new BigQuery({
+      projectId: BQ_CONFIG.projectId,
+      location: BQ_CONFIG.location
+    });
+  }
+
+  return { client: activeClientInstance, mode: activeAuthMode };
+}
+
+/**
+ * Retry helper with exponential backoff for transient BigQuery failures
+ */
+export async function withRetry(operation, maxRetries = 3, baseDelayMs = 400) {
+  let attempt = 0;
+  while (true) {
+    attempt++;
+    try {
+      return await operation();
+    } catch (err) {
+      const isRetryable =
+        err.code === 429 ||
+        err.code === 500 ||
+        err.code === 502 ||
+        err.code === 503 ||
+        err.code === 504 ||
+        err.message?.includes('rateLimitExceeded') ||
+        err.message?.includes('backendError') ||
+        err.message?.includes('ECONNRESET') ||
+        err.message?.includes('ETIMEDOUT') ||
+        err.message?.includes('socket hang up');
+
+      if (attempt >= maxRetries || !isRetryable) {
+        throw err;
+      }
+
+      const delay = baseDelayMs * Math.pow(2, attempt - 1) + Math.floor(Math.random() * 200);
+      console.warn(`[BigQuery Retry] Attempt ${attempt} failed: ${err.message}. Retrying in ${delay}ms...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+}
 
 /**
  * Execute a query with datacloud:antigravity attribution label.
- * Seamlessly falls back to bq CLI if Node SDK credentials fail.
+ * Tries Node.js SDK first, falls back to bq CLI if credentials fail.
  */
 export async function runQuery(sql) {
-  try {
-    return runQueryViaCli(sql);
-  } catch (err) {
-    console.error('BigQuery query error:', err.message);
-    throw err;
-  }
+  return withRetry(async () => {
+    try {
+      const { client } = getBigQueryClient();
+      const [rows] = await client.query({
+        query: sql,
+        location: BQ_CONFIG.location,
+        labels: { datacloud: 'antigravity' }
+      });
+      return rows;
+    } catch (sdkErr) {
+      // If token expired or auth issue, refresh client if using gcloud token
+      if (sdkErr.message?.includes('invalid_grant') || sdkErr.message?.includes('credentials') || sdkErr.code === 401) {
+        try {
+          const { client: refreshedClient } = getBigQueryClient(true);
+          const [rows] = await refreshedClient.query({
+            query: sql,
+            location: BQ_CONFIG.location,
+            labels: { datacloud: 'antigravity' }
+          });
+          return rows;
+        } catch (_) {}
+      }
+
+      // 2. Fall back to CLI
+      try {
+        return runQueryViaCli(sql);
+      } catch (cliErr) {
+        console.error('[BigQuery] Query execution failed on both SDK and CLI.');
+        console.error('SDK Error:', sdkErr.message);
+        console.error('CLI Error:', cliErr.message);
+        const enhancedError = new Error(`BigQuery Query Failed: ${sdkErr.message || cliErr.message}`);
+        enhancedError.code = sdkErr.code || cliErr.code || 'QUERY_FAILED';
+        enhancedError.errors = sdkErr.errors || [sdkErr.message];
+        enhancedError.troubleshooting = getTroubleshootingGuidance(sdkErr);
+        throw enhancedError;
+      }
+    }
+  });
 }
 
 /**
@@ -45,6 +207,89 @@ function runQueryViaCli(sql) {
   const cmd = `bq query --use_legacy_sql=false --format=json --project_id=${BQ_CONFIG.projectId} --location=${BQ_CONFIG.location} --label datacloud:antigravity`;
   const output = execSync(cmd, { input: sql, encoding: 'utf8', maxBuffer: 20 * 1024 * 1024 });
   return JSON.parse(output || '[]');
+}
+
+/**
+ * Explicit connection verification probe
+ */
+export async function verifyBigQueryConnectivity({ forceCheck = false } = {}) {
+  const now = Date.now();
+  if (!forceCheck && cachedConnectionState && (now - new Date(cachedConnectionState.lastVerifiedAt).getTime() < 30000)) {
+    return cachedConnectionState;
+  }
+
+  const startTime = Date.now();
+  try {
+    const { client, mode } = getBigQueryClient(forceCheck);
+    
+    // Test dataset metadata access
+    const dataset = client.dataset(BQ_CONFIG.datasetId);
+    const [metadata] = await dataset.getMetadata();
+
+    // Probe basic row count
+    const probeSql = `
+      SELECT CURRENT_TIMESTAMP() AS server_time, COUNT(1) AS total_records
+      FROM \`${BQ_CONFIG.projectId}.${BQ_CONFIG.datasetId}.fct_transactions\`
+    `;
+    const rows = await runQuery(probeSql);
+    const latencyMs = Date.now() - startTime;
+
+    cachedConnectionState = {
+      status: 'ONLINE',
+      connected: true,
+      project: BQ_CONFIG.projectId,
+      dataset: BQ_CONFIG.datasetId,
+      location: BQ_CONFIG.location,
+      authMode: mode,
+      latencyMs,
+      datasetDetails: {
+        id: metadata.id,
+        location: metadata.location,
+        totalRecords: rows[0]?.total_records || 0,
+        serverTime: rows[0]?.server_time?.value || new Date().toISOString()
+      },
+      lastVerifiedAt: new Date().toISOString()
+    };
+
+    console.log('================================================================');
+    console.log(' [BigQuery Connection] Verification SUCCESSFUL');
+    console.log(` Project:   ${BQ_CONFIG.projectId} (Dataset: ${BQ_CONFIG.datasetId})`);
+    console.log(` Location:  ${BQ_CONFIG.location}`);
+    console.log(` Auth Mode: ${mode}`);
+    console.log(` Latency:   ${latencyMs}ms`);
+    console.log('================================================================');
+
+    return cachedConnectionState;
+  } catch (err) {
+    const latencyMs = Date.now() - startTime;
+    const troubleshooting = getTroubleshootingGuidance(err);
+    
+    cachedConnectionState = {
+      status: 'OFFLINE',
+      connected: false,
+      project: BQ_CONFIG.projectId,
+      dataset: BQ_CONFIG.datasetId,
+      location: BQ_CONFIG.location,
+      latencyMs,
+      lastVerifiedAt: new Date().toISOString(),
+      error: {
+        code: err.code || 'CONNECTION_FAILED',
+        message: err.message,
+        details: err.errors || err.stack,
+        troubleshooting
+      }
+    };
+
+    console.error('================================================================');
+    console.error(' [BigQuery Connection] Verification FAILED!');
+    console.error(` Project:         ${BQ_CONFIG.projectId}`);
+    console.error(` Error Message:   ${err.message}`);
+    console.error(` Error Code:      ${err.code || 'UNKNOWN'}`);
+    console.error(` Troubleshooting: ${troubleshooting}`);
+    console.error('================================================================');
+
+    return cachedConnectionState;
+  }
 }
 
 /**

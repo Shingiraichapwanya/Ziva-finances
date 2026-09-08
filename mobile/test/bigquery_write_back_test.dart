@@ -369,13 +369,94 @@ void main() {
       expect(health['bigquery']['datasetId'], equals('personal_finance'));
     });
 
-    test('checkHealth throws on backend connection refusal or 500', () async {
+    test('checkHealth throws on backend connection refusal or non-JSON 500', () async {
       final mockClient = MockClient((request) async {
         return http.Response('Connection refused', 503);
       });
 
       final testApi = ApiService(customBaseUrl: 'http://localhost:3001', client: mockClient);
       expect(() async => await testApi.checkHealth(), throwsA(isA<Exception>()));
+    });
+
+    test('checkHealth decodes and returns structured diagnostic payload when backend reports offline', () async {
+      final mockClient = MockClient((request) async {
+        return http.Response(
+          jsonEncode({
+            'status': 'OFFLINE',
+            'connected': false,
+            'project': 'budget-tracker-507418',
+            'error': {
+              'code': 403,
+              'message': 'Access Denied: Dataset personal_finance',
+              'troubleshooting': 'Grant roles/bigquery.dataEditor to service account.'
+            }
+          }),
+          503,
+          headers: {'content-type': 'application/json'},
+        );
+      });
+
+      final testApi = ApiService(customBaseUrl: 'http://localhost:3001', client: mockClient);
+      final health = await testApi.checkHealth();
+
+      expect(health['status'], equals('OFFLINE'));
+      expect(health['connected'], equals(false));
+      expect(health['error']['code'], equals(403));
+      expect(health['error']['troubleshooting'], contains('Grant roles/bigquery.dataEditor'));
+    });
+
+    test('testConnection executes live connection probe and returns telemetry', () async {
+      final mockClient = MockClient((request) async {
+        if (request.url.path.contains('/api/connection-test')) {
+          return http.Response(
+            jsonEncode({
+              'status': 'ONLINE',
+              'connected': true,
+              'project': 'budget-tracker-507418',
+              'dataset': 'personal_finance',
+              'latencyMs': 142,
+              'datasetDetails': {'totalRecords': 45}
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        return http.Response('Not Found', 404);
+      });
+
+      final testApi = ApiService(customBaseUrl: 'http://localhost:3001', client: mockClient);
+      final result = await testApi.testConnection();
+
+      expect(result['connected'], isTrue);
+      expect(result['latencyMs'], equals(142));
+      expect(result['datasetDetails']['totalRecords'], equals(45));
+    });
+
+    test('postTransaction automatically retries on transient connection failure and succeeds', () async {
+      int attempts = 0;
+      final mockClient = MockClient((request) async {
+        attempts++;
+        if (attempts < 2) {
+          // Simulate transient 503 socket error
+          return http.Response('Backend unavailable (transient)', 503);
+        }
+        return http.Response(
+          jsonEncode({
+            'success': true,
+            'transactionId': 'TX_RETRY_001',
+            'persistedToBigQuery': true,
+          }),
+          201,
+          headers: {'content-type': 'application/json'},
+        );
+      });
+
+      final testApi = ApiService(customBaseUrl: 'http://localhost:3001', client: mockClient);
+      final result = await testApi.postTransaction({'transaction_id': 'TX_RETRY_001', 'amount': 100});
+
+      expect(attempts, equals(2));
+      expect(result['success'], isTrue);
+      expect(result['transactionId'], equals('TX_RETRY_001'));
     });
   });
 }
