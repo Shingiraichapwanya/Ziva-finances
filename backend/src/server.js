@@ -1,20 +1,22 @@
-/**
- * server.js - Express API Server for Ziva Finance
- * Streams live BigQuery analytics and ledger mutations to the Financial Command Center.
- */
-
-import express from 'express';
-import cors from 'cors';
-import {
-  BQ_CONFIG,
-  runQuery,
-  getExchangeRates,
-  getAccounts,
-  getTransactions,
-  getBudgetEnvelopes,
- const { BigQuery } = require('@google-cloud/bigquery');
+ const express = require('express');
+  const bodyParser = require('body-parser');
+  const cors = require('cors');
+  const { BigQuery } = require('@google-cloud/bigquery');
   
-  // Parse credentials from env var
+  // Finance and metrics imports
+  const {
+    getTaxSchedule,
+    getDailyBurnMetrics,
+    getMonthlyBurnMetrics,
+    getRunwayProjection,
+    getRevenueMetrics,
+  } = require('./services/financeService');
+  
+  // Add back any other imports you had here, for example:
+  // const { getCashBalance } = require('./services/cashService');
+  // const { getHeadcountMetrics } = require('./services/headcountService');
+  
+  // BigQuery from GOOGLE_CREDENTIALS env var
   const googleCredentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
   
   const bigquery = new BigQuery({
@@ -25,11 +27,18 @@ import {
     },
   });
   
-  // Example verify function
   async function verifyBigQuery() {
     try {
       const [datasets] = await bigquery.getDatasets();
       console.log('BigQuery connected. Dataset count:', datasets.length);
+    } catch (err) {
+      console.error('Error verifying BigQuery:', err);
+    }
+  }
+  
+  const app = express();
+  app.use(cors());
+  app.use(bodyParser.json());      console.log('BigQuery connected. Dataset count:', datasets.length);
     } catch (err) {
       console.error('Error verifying BigQuery:', err);
     }
