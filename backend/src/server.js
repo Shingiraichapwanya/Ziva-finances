@@ -1,63 +1,73 @@
- const express = require('express');
-  const bodyParser = require('body-parser');
-  const cors = require('cors');
-  const { BigQuery } = require('@google-cloud/bigquery');
-  
-  // Finance and metrics imports
-  const {
-    getTaxSchedule,
-    getDailyBurnMetrics,
-    getMonthlyBurnMetrics,
-    getRunwayProjection,
-    getRevenueMetrics,
-  } = require('./services/financeService');
-  
-  // Add back any other imports you had here, for example:
-  // const { getCashBalance } = require('./services/cashService');
-  // const { getHeadcountMetrics } = require('./services/headcountService');
-  
-  // BigQuery from GOOGLE_CREDENTIALS env var
-  const googleCredentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
-  
-  const bigquery = new BigQuery({
-    projectId: googleCredentials.project_id,
-    credentials: {
-      client_email: googleCredentials.client_email,
-      private_key: googleCredentials.private_key,
-    },
-  });
-  
-  async function verifyBigQuery() {
-    try {
-      const [datasets] = await bigquery.getDatasets();
-      console.log('BigQuery connected. Dataset count:', datasets.length);
-    } catch (err) {
-      console.error('Error verifying BigQuery:', err);
-    }
-  }
-  
-  const app = express();
-  app.use(cors());
-  app.use(bodyParser.json());      console.log('BigQuery connected. Dataset count:', datasets.length);
-    } catch (err) {
-      console.error('Error verifying BigQuery:', err);
-    }
-  }
-  getPerformanceSummary,
+const express = require('express');
+const bodyParser = require('body-parser');
+const cors = require('cors');
+const { BigQuery } = require('@google-cloud/bigquery');
+
+// Finance and metrics imports
+const {
+  getTaxSchedule,
+  getDailyBurnMetrics,
+  getMonthlyBurnMetrics,
+  getRunwayProjection,
+  getRevenueMetrics,
+} = require('./services/financeService');
+
+// BigQuery helper & database service imports
+const {
+  BQ_CONFIG,
+  runQuery,
+  getExchangeRates,
+  getAccounts,
+  getTransactions,
+  insertTransaction,
+  deleteTransaction,
   getDebts,
   getDebtBalances,
   insertDebt,
   settleDebt,
   deleteDebt,
+  getBudgetEnvelopes,
+  getVaultHoldings,
+  getIncomeStatements,
+  getNonOperatingGains,
+  getPerformanceSummary,
   verifyBigQueryConnectivity,
-  getTroubleshootingGuidance
-} from './bigquery.js';
-import { getCopilotInsights, chatWithCopilot } from './copilot.js';
+  getTroubleshootingGuidance,
+} = require('./bigquery');
+
+// AI Copilot service imports
+const {
+  getCopilotInsights,
+  chatWithCopilot,
+} = require('./copilot');
+
+// BigQuery initialization from GOOGLE_CREDENTIALS env var
+const googleCredentials = process.env.GOOGLE_CREDENTIALS
+  ? JSON.parse(process.env.GOOGLE_CREDENTIALS)
+  : {};
+
+const bigquery = new BigQuery({
+  projectId: googleCredentials.project_id,
+  credentials: {
+    client_email: googleCredentials.client_email,
+    private_key: googleCredentials.private_key,
+  },
+});
+
+async function verifyBigQuery() {
+  try {
+    const [datasets] = await bigquery.getDatasets();
+    console.log('BigQuery connected. Dataset count:', datasets.length);
+  } catch (err) {
+    console.error('Error verifying BigQuery:', err);
+  }
+}
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
 app.use(cors());
+app.use(bodyParser.json());
 app.use(express.json());
 
 // Health & Status endpoint with rich BigQuery connectivity diagnostics
@@ -342,8 +352,11 @@ app.listen(PORT, async () => {
   console.log(` Connected to GCP Project: ${BQ_CONFIG.projectId}`);
   console.log(` Dataset: ${BQ_CONFIG.datasetId} (${BQ_CONFIG.location})`);
   console.log(`=======================================================`);
-  
+
   // Explicit startup connectivity test
   console.log('[Startup Check] Verifying BigQuery warehouse connectivity...');
   await verifyBigQueryConnectivity({ forceCheck: true });
+  await verifyBigQuery();
 });
+
+module.exports = app;
