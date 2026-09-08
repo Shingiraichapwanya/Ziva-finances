@@ -12,13 +12,28 @@ import {
   getAccounts,
   getTransactions,
   getBudgetEnvelopes,
-  getTaxSchedule,
-  getDailyBurnMetrics,
-  getVaultHoldings,
-  insertTransaction,
-  deleteTransaction,
-  getIncomeStatements,
-  getNonOperatingGains,
+ const { BigQuery } = require('@google-cloud/bigquery');
+  
+  // Parse credentials from env var
+  const googleCredentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
+  
+  const bigquery = new BigQuery({
+    projectId: googleCredentials.project_id,
+    credentials: {
+      client_email: googleCredentials.client_email,
+      private_key: googleCredentials.private_key,
+    },
+  });
+  
+  // Example verify function
+  async function verifyBigQuery() {
+    try {
+      const [datasets] = await bigquery.getDatasets();
+      console.log('BigQuery connected. Dataset count:', datasets.length);
+    } catch (err) {
+      console.error('Error verifying BigQuery:', err);
+    }
+  }
   getPerformanceSummary,
   getDebts,
   getDebtBalances,
