@@ -10,7 +10,7 @@ const {
   getMonthlyBurnMetrics,
   getRunwayProjection,
   getRevenueMetrics,
-} = require('./services/financeService');
+} = require('../services/financeService');
 
 // BigQuery helper & database service imports
 const {
