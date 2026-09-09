@@ -1,3 +1,41 @@
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+
+/**
+ * Startup function: Ensure BigQuery credentials provided as a JSON string
+ * in GOOGLE_APPLICATION_CREDENTIALS are written to a temporary physical file
+ * before any Google Cloud SDK client initializes.
+ */
+function setupGoogleCredentials() {
+  const rawCreds = process.env.GOOGLE_APPLICATION_CREDENTIALS || process.env.GOOGLE_CREDENTIALS;
+  if (!rawCreds) {
+    return;
+  }
+
+  const trimmed = rawCreds.trim();
+  // Check if credentials are provided as a JSON string rather than a file path
+  if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+    try {
+      // Validate JSON formatting
+      JSON.parse(trimmed);
+
+      // Resolve temporary file path (/tmp on Linux/Render or os.tmpdir() fallback)
+      const tempDir = fs.existsSync('/tmp') ? '/tmp' : os.tmpdir();
+      const tempFilePath = path.join(tempDir, 'google-creds.json');
+
+      fs.writeFileSync(tempFilePath, trimmed, { mode: 0o600, encoding: 'utf8' });
+      process.env.GOOGLE_APPLICATION_CREDENTIALS = tempFilePath;
+      console.log(`[Startup] Google credentials JSON string written to temporary file: ${tempFilePath}`);
+    } catch (err) {
+      console.error('[Startup] Failed to parse and write GOOGLE_APPLICATION_CREDENTIALS JSON string:', err.message);
+    }
+  }
+}
+
+// Execute immediately at the very beginning of server startup
+setupGoogleCredentials();
+
 const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
@@ -41,18 +79,29 @@ const {
   chatWithCopilot,
 } = require('./copilot');
 
-// BigQuery initialization from GOOGLE_CREDENTIALS env var
-const googleCredentials = process.env.GOOGLE_CREDENTIALS
-  ? JSON.parse(process.env.GOOGLE_CREDENTIALS)
-  : {};
-
-const bigquery = new BigQuery({
-  projectId: googleCredentials.project_id,
-  credentials: {
-    client_email: googleCredentials.client_email,
-    private_key: googleCredentials.private_key,
-  },
-});
+// BigQuery client initialization
+let bigquery;
+try {
+  if (process.env.GOOGLE_APPLICATION_CREDENTIALS && fs.existsSync(process.env.GOOGLE_APPLICATION_CREDENTIALS)) {
+    bigquery = new BigQuery({
+      keyFilename: process.env.GOOGLE_APPLICATION_CREDENTIALS,
+    });
+  } else if (process.env.GOOGLE_CREDENTIALS) {
+    const creds = JSON.parse(process.env.GOOGLE_CREDENTIALS);
+    bigquery = new BigQuery({
+      projectId: creds.project_id,
+      credentials: {
+        client_email: creds.client_email,
+        private_key: creds.private_key,
+      },
+    });
+  } else {
+    bigquery = new BigQuery();
+  }
+} catch (err) {
+  console.warn('[Startup] BigQuery initialization fallback:', err.message);
+  bigquery = new BigQuery();
+}
 
 async function verifyBigQuery() {
   try {
