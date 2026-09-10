@@ -1,7 +1,7 @@
 /**
  * api.ts - Type-Safe BigQuery REST API Client for Ziva Finance
  * Connects frontend to the Express BigQuery backend running on /api
- */
+ */ 
 
 import {
   Account,
