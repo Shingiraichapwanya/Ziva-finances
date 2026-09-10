@@ -5,6 +5,7 @@
  * Grounded in Google Cloud Project: budget-tracker-507418, Dataset: personal_finance
  * 
  * Provides:
+ *  - Native SDK Ingestion (table.insert / insertRows) replacing CLI 'bq' calls
  *  - Daily & Monthly Burn Rate Calculations
  *  - Cash Runway Forecasting & Survival Date Projections
  *  - Monthly Spending Trends by Category & Month-over-Month Variance
@@ -126,8 +127,60 @@ async function runQuery(sql, params = {}) {
 }
 
 /**
+ * Inserts one or more rows directly into a BigQuery table using streaming insert.
+ * Replaces any calls that previously shelled out to `bq insert` or `bq load`.
+ *
+ * @param {string} tableName - e.g. 'fct_transactions'
+ * @param {Object|Object[]} rows - Single row object or array of row objects
+ * @param {Object} [options] - Optional BigQuery insert options (e.g. raw, ignoreUnknownValues)
+ */
+async function insertRows(tableName, rows, options = {}) {
+  const client = getBigQueryClient();
+  const dataset = client.dataset(BQ_CONFIG.datasetId);
+  const table = dataset.table(tableName);
+
+  const payload = Array.isArray(rows) ? rows : [rows];
+  if (payload.length === 0) return { inserted: 0 };
+
+  try {
+    const defaultOptions = {
+      raw: false,
+      ignoreUnknownValues: true,
+      skipInvalidRows: false,
+      ...options,
+    };
+
+    const [apiResponse] = await table.insert(payload, defaultOptions);
+    return {
+      success: true,
+      insertedCount: payload.length,
+      response: apiResponse,
+    };
+  } catch (err) {
+    // BigQuery partial failure details are populated in err.errors
+    if (err.name === 'PartialFailureError' && err.errors) {
+      console.error(
+        `[financeService] Partial failure inserting into ${tableName}:`,
+        JSON.stringify(err.errors, null, 2)
+      );
+      throw new Error(
+        `BigQuery streaming insert failed for ${err.errors.length} rows: ${err.errors[0]?.errors[0]?.message || err.message}`
+      );
+    }
+    console.error(`[financeService] Error inserting rows into ${tableName}:`, err);
+    throw err;
+  }
+}
+
+/**
+ * Insert a single transaction record into fct_transactions
+ */
+async function recordTransaction(transactionData) {
+  return insertRows('fct_transactions', transactionData);
+}
+
+/**
  * 1. Calculate Daily Spending Burn Rate Metrics
- * Returns rolling 7-day average, daily burn velocity, and alert indicators.
  */
 async function getDailyBurnMetrics(days = 14) {
   try {
@@ -201,7 +254,6 @@ async function getDailyBurnMetrics(days = 14) {
 
 /**
  * 2. Calculate Current Monthly Burn Rate and Historical Monthly Burn
- * Computes month-to-date burn, average monthly burn across historical windows, and MoM trend.
  */
 async function getMonthlyBurnMetrics(months = 6) {
   const sql = `
@@ -273,7 +325,6 @@ async function getMonthlyBurnMetrics(months = 6) {
 
 /**
  * 3. Create Cash Runway Projections
- * Calculates runway days and survival date based on current liquid reserves and average burn.
  */
 async function getRunwayProjection() {
   const accountsSql = `
@@ -316,7 +367,6 @@ async function getRunwayProjection() {
     }
   });
 
-  // Calculate authoritative average daily burn
   let avgDailyBurnZar = monthlyMetrics.averageDailyBurnZar || 650;
   if (dailyMetrics && dailyMetrics.length > 0) {
     const recentAvg = dailyMetrics.reduce((sum, d) => sum + d.dailySpendZar, 0) / dailyMetrics.length;
@@ -327,18 +377,15 @@ async function getRunwayProjection() {
 
   const avgMonthlyBurnZar = avgDailyBurnZar * 30;
 
-  // Liquid Runway (checking and operational accounts)
   const baselineRunwayDays = avgDailyBurnZar > 0 ? Math.max(0, Math.floor(liquidReserveZar / avgDailyBurnZar)) : 999;
   const baselineRunwayMonths = avgMonthlyBurnZar > 0 ? parseFloat((liquidReserveZar / avgMonthlyBurnZar).toFixed(1)) : 99;
   const survivalDate = new Date(Date.now() + baselineRunwayDays * 86400000).toISOString().split('T')[0];
 
-  // Total Runway (including long-term vault assets)
   const totalReserveZar = liquidReserveZar + vaultTotalZar;
   const totalRunwayDays = avgDailyBurnZar > 0 ? Math.max(0, Math.floor(totalReserveZar / avgDailyBurnZar)) : 999;
   const totalRunwayMonths = avgMonthlyBurnZar > 0 ? parseFloat((totalReserveZar / avgMonthlyBurnZar).toFixed(1)) : 99;
   const extendedSurvivalDate = new Date(Date.now() + totalRunwayDays * 86400000).toISOString().split('T')[0];
 
-  // Conservative Stress Test (+25% burn acceleration)
   const stressedDailyBurnZar = Math.round(avgDailyBurnZar * 1.25);
   const stressedRunwayDays = stressedDailyBurnZar > 0 ? Math.max(0, Math.floor(liquidReserveZar / stressedDailyBurnZar)) : 999;
 
@@ -366,7 +413,6 @@ async function getRunwayProjection() {
 
 /**
  * 4. Monthly Category Spending Trends
- * Returns structured spending by category over recent months, identifying top cost drivers.
  */
 async function getMonthlySpendingTrends(months = 6) {
   const sql = `
@@ -387,7 +433,6 @@ async function getMonthlySpendingTrends(months = 6) {
 
   const rows = await runQuery(sql);
 
-  // Group by month
   const trendsByMonth = {};
   rows.forEach((r) => {
     if (!trendsByMonth[r.month]) {
@@ -423,7 +468,6 @@ async function getMonthlySpendingTrends(months = 6) {
 
 /**
  * 5. Monthly Revenue and Income Inflow Metrics
- * Computes gross revenue, transaction volume, and inflow history.
  */
 async function getRevenueMetrics(months = 6) {
   const sql = `
@@ -464,7 +508,6 @@ async function getRevenueMetrics(months = 6) {
 
 /**
  * 6. Quarterly Tax Schedule & Deduction Metrics
- * Fetches provisional tax liability, allowable deductions, and settlement status.
  */
 async function getTaxSchedule() {
   try {
@@ -550,6 +593,10 @@ async function getTaxSchedule() {
 
 // 7. Harmonized Exports
 const financeService = {
+  getBigQueryClient,
+  runQuery,
+  insertRows,
+  recordTransaction,
   getDailyBurnMetrics,
   getMonthlyBurnMetrics,
   getRunwayProjection,
@@ -557,6 +604,7 @@ const financeService = {
   getRevenueMetrics,
   getTaxSchedule,
   BQ_CONFIG,
+  OPENING_BALANCES,
 };
 
 module.exports = {
