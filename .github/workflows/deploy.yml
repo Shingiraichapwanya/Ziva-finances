@@ -29,9 +29,11 @@ jobs:
           node-version: 20
 
       - name: Install dependencies
+        working-directory: frontend
         run: npm install
 
       - name: Build site
+        working-directory: frontend
         env:
           VITE_RENDER_URL: ${{ secrets.RENDER_URL }}
         run: npm run build
@@ -39,7 +41,7 @@ jobs:
       - name: Upload build artifact for GitHub Pages
         uses: actions/upload-pages-artifact@v3
         with:
-          path: dist
+          path: frontend/dist
 
   deploy:
     environment:
