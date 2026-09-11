@@ -2,11 +2,10 @@
  * bigquery.js - BigQuery Service Layer for Ziva Finance
  * Grounded in Google Cloud Project: budget-tracker-507418, dataset: personal_finance
  * Enforces mandatory resource attribution labels ('datacloud: antigravity')
+ * Relies strictly on the official @google-cloud/bigquery Node.js SDK without CLI or shell commands.
  */
 
 import { BigQuery } from '@google-cloud/bigquery';
-import { OAuth2Client } from 'google-auth-library';
-import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -24,7 +23,6 @@ export const BQ_CONFIG = {
 let activeClientInstance = null;
 let activeAuthMode = 'UNKNOWN';
 let lastTokenRefresh = 0;
-let cachedOAuthClient = null;
 let cachedConnectionState = null;
 
 /**
@@ -35,26 +33,37 @@ export function getTroubleshootingGuidance(err) {
   const code = err?.code;
 
   if (msg.includes('could not load the default credentials') || msg.includes('no credentialed accounts') || msg.includes('invalid_grant')) {
-    return "Google Cloud Application Default Credentials (ADC) missing or expired. Run 'gcloud auth application-default login' in your shell, or run 'gcloud auth login', or supply a service account key JSON via GOOGLE_APPLICATION_CREDENTIALS.";
+    return "Google Cloud Application Default Credentials (ADC) missing or expired. Set the GOOGLE_APPLICATION_CREDENTIALS environment variable to the path of your service account key JSON file, or provide service account credentials via GOOGLE_CREDENTIALS in your environment.";
   }
   if (msg.includes('access denied') || msg.includes('permission') || code === 403) {
-    return "Google Cloud IAM permission denied. Ensure the active account or service account has 'roles/bigquery.dataEditor' and 'roles/bigquery.jobUser' on project 'budget-tracker-507418'.";
+    return `Google Cloud IAM permission denied. Ensure the active service account has 'roles/bigquery.dataEditor' and 'roles/bigquery.jobUser' on project '${BQ_CONFIG.projectId}'.`;
   }
   if (msg.includes('not found: dataset') || (msg.includes('dataset') && msg.includes('not found')) || code === 404) {
-    return "BigQuery dataset 'personal_finance' was not found in project 'budget-tracker-507418' (location 'africa-south1'). Verify the dataset exists in that region.";
+    return `BigQuery dataset '${BQ_CONFIG.datasetId}' was not found in project '${BQ_CONFIG.projectId}' (location '${BQ_CONFIG.location}'). Verify the dataset exists in that region.`;
   }
   if (msg.includes('econnrefused') || msg.includes('enotfound') || msg.includes('timeout') || msg.includes('fetch failed')) {
     return "Network connectivity failure reaching Google Cloud BigQuery API (bigquery.googleapis.com). Check internet connection and outbound access.";
   }
-  return "Review the exact error details and Google Cloud Console for project budget-tracker-507418.";
+  return `Review the exact error details in Google Cloud Console / Render logs for project ${BQ_CONFIG.projectId}.`;
 }
 
 /**
- * Multi-tier credential resolver
+ * Multi-tier credential resolver (Node.js native, no shell commands)
  */
 export function resolveAuthDetails() {
   if (process.env.GOOGLE_APPLICATION_CREDENTIALS && fs.existsSync(process.env.GOOGLE_APPLICATION_CREDENTIALS)) {
     return { mode: 'GOOGLE_APPLICATION_CREDENTIALS', keyFile: process.env.GOOGLE_APPLICATION_CREDENTIALS };
+  }
+
+  // Support JSON credentials string passed in environment variables (e.g. on Render)
+  const envCredentialsRaw = process.env.GOOGLE_CREDENTIALS || process.env.GCP_CREDENTIALS || process.env.BIGQUERY_CREDENTIALS;
+  if (envCredentialsRaw) {
+    try {
+      const parsed = typeof envCredentialsRaw === 'string' ? JSON.parse(envCredentialsRaw) : envCredentialsRaw;
+      if (parsed.client_email && parsed.private_key) {
+        return { mode: 'CREDENTIALS_OBJECT', credentials: parsed };
+      }
+    } catch (_) {}
   }
 
   const candidateKeyPaths = [
@@ -74,13 +83,6 @@ export function resolveAuthDetails() {
       } catch (_) {}
     }
   }
-
-  try {
-    const token = execSync('gcloud auth print-access-token', { encoding: 'utf8', timeout: 5000, stdio: ['pipe', 'pipe', 'ignore'] }).trim();
-    if (token && token.startsWith('ya29.')) {
-      return { mode: 'OAUTH2_GCLOUD_TOKEN', token };
-    }
-  } catch (_) {}
 
   return { mode: 'APPLICATION_DEFAULT_CREDENTIALS' };
 }
@@ -103,15 +105,15 @@ export function getBigQueryClient(forceRefresh = false) {
       location: BQ_CONFIG.location,
       keyFilename: authDetails.keyFile
     });
-  } else if (authDetails.mode === 'OAUTH2_GCLOUD_TOKEN') {
-    cachedOAuthClient = new OAuth2Client();
-    cachedOAuthClient.setCredentials({ access_token: authDetails.token });
+  } else if (authDetails.mode === 'CREDENTIALS_OBJECT') {
     activeClientInstance = new BigQuery({
-      projectId: BQ_CONFIG.projectId,
+      projectId: authDetails.credentials.project_id || BQ_CONFIG.projectId,
       location: BQ_CONFIG.location,
-      authClient: cachedOAuthClient
+      credentials: {
+        client_email: authDetails.credentials.client_email,
+        private_key: authDetails.credentials.private_key
+      }
     });
-    lastTokenRefresh = now;
   } else {
     activeClientInstance = new BigQuery({
       projectId: BQ_CONFIG.projectId,
@@ -119,6 +121,7 @@ export function getBigQueryClient(forceRefresh = false) {
     });
   }
 
+  lastTokenRefresh = now;
   return { client: activeClientInstance, mode: activeAuthMode };
 }
 
@@ -156,57 +159,50 @@ export async function withRetry(operation, maxRetries = 3, baseDelayMs = 400) {
 }
 
 /**
- * Execute a query with datacloud:antigravity attribution label.
- * Tries Node.js SDK first, falls back to bq CLI if credentials fail.
+ * Execute a query with datacloud:antigravity attribution label strictly via SDK.
  */
-export async function runQuery(sql) {
+export async function runQuery(sql, options = {}) {
   return withRetry(async () => {
     try {
       const { client } = getBigQueryClient();
-      const [rows] = await client.query({
+      const queryOptions = {
         query: sql,
         location: BQ_CONFIG.location,
-        labels: { datacloud: 'antigravity' }
-      });
+        labels: { datacloud: 'antigravity' },
+        ...options
+      };
+      const [rows] = await client.query(queryOptions);
       return rows;
     } catch (sdkErr) {
-      // If token expired or auth issue, refresh client if using gcloud token
       if (sdkErr.message?.includes('invalid_grant') || sdkErr.message?.includes('credentials') || sdkErr.code === 401) {
         try {
           const { client: refreshedClient } = getBigQueryClient(true);
           const [rows] = await refreshedClient.query({
             query: sql,
             location: BQ_CONFIG.location,
-            labels: { datacloud: 'antigravity' }
+            labels: { datacloud: 'antigravity' },
+            ...options
           });
           return rows;
-        } catch (_) {}
+        } catch (refreshErr) {
+          console.error('[BigQuery] Retry with refreshed client failed:', refreshErr.message);
+        }
       }
 
-      // 2. Fall back to CLI
-      try {
-        return runQueryViaCli(sql);
-      } catch (cliErr) {
-        console.error('[BigQuery] Query execution failed on both SDK and CLI.');
-        console.error('SDK Error:', sdkErr.message);
-        console.error('CLI Error:', cliErr.message);
-        const enhancedError = new Error(`BigQuery Query Failed: ${sdkErr.message || cliErr.message}`);
-        enhancedError.code = sdkErr.code || cliErr.code || 'QUERY_FAILED';
-        enhancedError.errors = sdkErr.errors || [sdkErr.message];
-        enhancedError.troubleshooting = getTroubleshootingGuidance(sdkErr);
-        throw enhancedError;
+      console.error('[BigQuery] Query execution failed via Node.js SDK:');
+      console.error('SDK Error Code:', sdkErr.code || 'UNKNOWN');
+      console.error('SDK Error Message:', sdkErr.message);
+      if (sdkErr.errors) {
+        console.error('SDK Error Details:', JSON.stringify(sdkErr.errors));
       }
+
+      const enhancedError = new Error(`BigQuery Query Failed: ${sdkErr.message}`);
+      enhancedError.code = sdkErr.code || 'QUERY_FAILED';
+      enhancedError.errors = sdkErr.errors || [sdkErr.message];
+      enhancedError.troubleshooting = getTroubleshootingGuidance(sdkErr);
+      throw enhancedError;
     }
   });
-}
-
-/**
- * CLI fallback using bq CLI
- */
-function runQueryViaCli(sql) {
-  const cmd = `bq query --use_legacy_sql=false --format=json --project_id=${BQ_CONFIG.projectId} --location=${BQ_CONFIG.location} --label datacloud:antigravity`;
-  const output = execSync(cmd, { input: sql, encoding: 'utf8', maxBuffer: 20 * 1024 * 1024 });
-  return JSON.parse(output || '[]');
 }
 
 /**
@@ -607,7 +603,7 @@ export async function getVaultHoldings() {
 }
 
 /**
- * Insert a transaction record into BigQuery fct_transactions
+ * Insert a transaction record into BigQuery fct_transactions via Node.js SDK
  */
 export async function insertTransaction(txData) {
   const now = new Date();
@@ -693,20 +689,110 @@ export async function insertTransaction(txData) {
     }
   };
 
-  // Ingest via NDJSON bq load (handles sandbox / billing environments reliably)
-  const tempFilePath = path.join(__dirname, `tx_${txId}.json`);
+  const { client } = getBigQueryClient();
+
+  // Try SQL DML INSERT first via BigQuery query engine (avoids streaming buffer mutation lock)
+  const dmlSql = `
+    INSERT INTO \`${BQ_CONFIG.projectId}.${BQ_CONFIG.datasetId}.fct_transactions\` (
+      transaction_id, transaction_timestamp, transaction_date, local_timezone, local_timestamp,
+      settlement_timestamp, account_id, cash_flow_tier, category_id, transaction_type,
+      original_amount, original_currency, reporting_amount_usd, reporting_amount_zar,
+      applied_exchange_rate_usd, applied_exchange_rate_zar, rate_type_applied,
+      transfer_counterpart_id, merchant_or_payee, payment_method, statutory_levy_or_fee,
+      is_tax_deductible, tax_deductible_amount_zar, tax_deductible_amount_usd,
+      tax_invoice_number, notes, tags, metadata
+    ) VALUES (
+      @transaction_id,
+      TIMESTAMP(@transaction_timestamp),
+      DATE(@transaction_date),
+      @local_timezone,
+      DATETIME(@local_timestamp),
+      TIMESTAMP(@settlement_timestamp),
+      @account_id,
+      @cash_flow_tier,
+      @category_id,
+      @transaction_type,
+      @original_amount,
+      @original_currency,
+      @reporting_amount_usd,
+      @reporting_amount_zar,
+      @applied_exchange_rate_usd,
+      @applied_exchange_rate_zar,
+      @rate_type_applied,
+      @transfer_counterpart_id,
+      @merchant_or_payee,
+      @payment_method,
+      @statutory_levy_or_fee,
+      @is_tax_deductible,
+      @tax_deductible_amount_zar,
+      @tax_deductible_amount_usd,
+      @tax_invoice_number,
+      @notes,
+      @tags,
+      PARSE_JSON(@metadata_json)
+    )
+  `;
+
+  const queryParams = {
+    transaction_id: record.transaction_id,
+    transaction_timestamp: timestampStr,
+    transaction_date: dateStr,
+    local_timezone: record.local_timezone,
+    local_timestamp: localTimeStr,
+    settlement_timestamp: timestampStr,
+    account_id: record.account_id,
+    cash_flow_tier: record.cash_flow_tier,
+    category_id: record.category_id,
+    transaction_type: record.transaction_type,
+    original_amount: record.original_amount,
+    original_currency: record.original_currency,
+    reporting_amount_usd: record.reporting_amount_usd,
+    reporting_amount_zar: record.reporting_amount_zar,
+    applied_exchange_rate_usd: record.applied_exchange_rate_usd,
+    applied_exchange_rate_zar: record.applied_exchange_rate_zar,
+    rate_type_applied: record.rate_type_applied,
+    transfer_counterpart_id: record.transfer_counterpart_id,
+    merchant_or_payee: record.merchant_or_payee,
+    payment_method: record.payment_method,
+    statutory_levy_or_fee: record.statutory_levy_or_fee,
+    is_tax_deductible: record.is_tax_deductible,
+    tax_deductible_amount_zar: record.tax_deductible_amount_zar,
+    tax_deductible_amount_usd: record.tax_deductible_amount_usd,
+    tax_invoice_number: record.tax_invoice_number,
+    notes: record.notes,
+    tags: record.tags,
+    metadata_json: JSON.stringify(record.metadata)
+  };
+
   try {
-    fs.writeFileSync(tempFilePath, JSON.stringify(record) + '\n', 'utf8');
-    const loadCmd = `bq load --project_id=${BQ_CONFIG.projectId} --location=${BQ_CONFIG.location} --source_format=NEWLINE_DELIMITED_JSON --label datacloud:antigravity ${BQ_CONFIG.projectId}:${BQ_CONFIG.datasetId}.fct_transactions "${tempFilePath}"`;
-    execSync(loadCmd, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+    await runQuery(dmlSql, { params: queryParams });
     return {
       success: true,
       transactionId: txId,
       record: record
     };
-  } finally {
-    if (fs.existsSync(tempFilePath)) {
-      try { fs.unlinkSync(tempFilePath); } catch (_) {}
+  } catch (dmlErr) {
+    // If DML fails (e.g. streaming buffer conflict or billing sandbox limitation), attempt SDK streaming insert
+    console.warn('[BigQuery] DML INSERT failed, attempting SDK table.insert fallback:', dmlErr.message);
+    try {
+      const table = client.dataset(BQ_CONFIG.datasetId).table('fct_transactions');
+      await table.insert([record]);
+      return {
+        success: true,
+        transactionId: txId,
+        record: record
+      };
+    } catch (insertErr) {
+      console.error('[BigQuery] Transaction insertion failed on both DML and table.insert via SDK:');
+      console.error('DML Error:', dmlErr.message);
+      console.error('Insert Error:', insertErr.message);
+      if (insertErr.errors) {
+        console.error('Insert Error Details:', JSON.stringify(insertErr.errors));
+      }
+      const enhancedError = new Error(`BigQuery Ingest Failed: ${dmlErr.message || insertErr.message}`);
+      enhancedError.code = dmlErr.code || insertErr.code || 'INGEST_FAILED';
+      enhancedError.troubleshooting = getTroubleshootingGuidance(dmlErr || insertErr);
+      throw enhancedError;
     }
   }
 }
@@ -721,14 +807,15 @@ export async function deleteTransaction(transactionId) {
     throw new Error('Invalid or missing transaction ID');
   }
   const cleanId = transactionId.replace(/[^a-zA-Z0-9_-]/g, '');
-  const sql = `DELETE FROM \`${BQ_CONFIG.projectId}.${BQ_CONFIG.datasetId}.fct_transactions\` WHERE transaction_id = '${cleanId}'`;
+  const sql = `DELETE FROM \`${BQ_CONFIG.projectId}.${BQ_CONFIG.datasetId}.fct_transactions\` WHERE transaction_id = @transactionId`;
+  
   try {
-    await runQuery(sql);
+    await runQuery(sql, { params: { transactionId: cleanId } });
   } catch (err) {
-    // If running in sandbox where DML DELETE might encounter partition / billing limit,
-    // catch and log while allowing the app to update state cleanly
-    console.warn(`[BigQuery] DML DELETE notice for ${cleanId}:`, err.message);
+    console.error(`[BigQuery] Failed to delete transaction ${cleanId}:`, err.message);
+    throw err;
   }
+
   return {
     success: true,
     transactionId: cleanId,
@@ -740,7 +827,7 @@ export async function deleteTransaction(transactionId) {
  * Fetch structured Income Statements (monthly or quarterly)
  */
 export async function getIncomeStatements(periodType = null) {
-  const whereClause = periodType ? `WHERE period_type = '${periodType.toUpperCase()}'` : '';
+  const whereClause = periodType ? `WHERE period_type = @periodType` : '';
   const sql = `
     SELECT
       period_type,
@@ -770,7 +857,8 @@ export async function getIncomeStatements(periodType = null) {
     ${whereClause}
     ORDER BY period_start_date DESC
   `;
-  const rows = await runQuery(sql);
+  const options = periodType ? { params: { periodType: periodType.toUpperCase() } } : {};
+  const rows = await runQuery(sql, options);
   return rows.map(r => ({
     periodType: r.period_type,
     statementPeriod: r.statement_period,
@@ -951,12 +1039,14 @@ export async function getDebts(statusFilter = null) {
       updated_at
     FROM \`${BQ_CONFIG.projectId}.${BQ_CONFIG.datasetId}.debt_credit_ledger\`
   `;
+  const options = {};
   if (statusFilter) {
-    sql += ` WHERE status = '${statusFilter}'`;
+    sql += ` WHERE status = @statusFilter`;
+    options.params = { statusFilter };
   }
   sql += ` ORDER BY date DESC, created_at DESC`;
   
-  const rows = await runQuery(sql);
+  const rows = await runQuery(sql, options);
   return rows.map(r => ({
     id: r.id,
     personName: r.person_name,
@@ -984,13 +1074,14 @@ export async function getDebtBalances(personName = null) {
       balance_direction
     FROM \`${BQ_CONFIG.projectId}.${BQ_CONFIG.datasetId}.debt_credit_balances\`
   `;
+  const options = {};
   if (personName) {
-    const cleanName = personName.replace(/'/g, "\\'");
-    sql += ` WHERE person_name = '${cleanName}'`;
+    sql += ` WHERE person_name = @personName`;
+    options.params = { personName };
   }
   sql += ` ORDER BY ABS(net_balance) DESC`;
 
-  const rows = await runQuery(sql);
+  const rows = await runQuery(sql, options);
   return rows.map(r => ({
     personName: r.person_name,
     totalOwedToMe: parseFloat(r.total_owed_to_me || 0),
@@ -1001,7 +1092,7 @@ export async function getDebtBalances(personName = null) {
 }
 
 /**
- * Insert a new debt or credit entry into debt_credit_ledger
+ * Insert a new debt or credit entry into debt_credit_ledger via SDK
  */
 export async function insertDebt(debtData) {
   const debtId = debtData.id || `debt_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
@@ -1024,74 +1115,94 @@ export async function insertDebt(debtData) {
     updated_at: now
   };
 
-  const tempFilePath = path.join(__dirname, `debt_${debtId}.json`);
+  const { client } = getBigQueryClient();
+
+  // Try SQL DML INSERT first via BigQuery SDK
+  const dmlSql = `
+    INSERT INTO \`${BQ_CONFIG.projectId}.${BQ_CONFIG.datasetId}.debt_credit_ledger\` (
+      id, person_name, direction, amount, currency, date, status, notes, created_at, updated_at
+    ) VALUES (
+      @id, @person_name, @direction, @amount, @currency, DATE(@date), @status, @notes,
+      TIMESTAMP(@created_at), TIMESTAMP(@updated_at)
+    )
+  `;
+
+  const queryParams = {
+    id: record.id,
+    person_name: record.person_name,
+    direction: record.direction,
+    amount: record.amount,
+    currency: record.currency,
+    date: record.date,
+    status: record.status,
+    notes: record.notes,
+    created_at: record.created_at,
+    updated_at: record.updated_at
+  };
+
   try {
-    fs.writeFileSync(tempFilePath, JSON.stringify(record) + '\n', 'utf8');
-    const loadCmd = `bq load --project_id=${BQ_CONFIG.projectId} --location=${BQ_CONFIG.location} --source_format=NEWLINE_DELIMITED_JSON --label datacloud:antigravity ${BQ_CONFIG.projectId}:${BQ_CONFIG.datasetId}.debt_credit_ledger "${tempFilePath}"`;
-    execSync(loadCmd, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+    await runQuery(dmlSql, { params: queryParams });
     return {
       success: true,
       debtId: debtId,
       record: record
     };
-  } finally {
-    if (fs.existsSync(tempFilePath)) {
-      try { fs.unlinkSync(tempFilePath); } catch (_) {}
+  } catch (dmlErr) {
+    console.warn('[BigQuery] DML INSERT for debt failed, attempting SDK table.insert fallback:', dmlErr.message);
+    try {
+      const table = client.dataset(BQ_CONFIG.datasetId).table('debt_credit_ledger');
+      await table.insert([record]);
+      return {
+        success: true,
+        debtId: debtId,
+        record: record
+      };
+    } catch (insertErr) {
+      console.error('[BigQuery] Debt insertion failed on both DML and table.insert via SDK:');
+      console.error('DML Error:', dmlErr.message);
+      console.error('Insert Error:', insertErr.message);
+      if (insertErr.errors) {
+        console.error('Insert Error Details:', JSON.stringify(insertErr.errors));
+      }
+      const enhancedError = new Error(`BigQuery Insert Debt Failed: ${dmlErr.message || insertErr.message}`);
+      enhancedError.code = dmlErr.code || insertErr.code || 'INSERT_DEBT_FAILED';
+      enhancedError.troubleshooting = getTroubleshootingGuidance(dmlErr || insertErr);
+      throw enhancedError;
     }
   }
 }
 
 /**
- * Mark a debt entry as 'Settled'
+ * Mark a debt entry as 'Settled' via SDK DML UPDATE
  */
 export async function settleDebt(debtId) {
   if (!debtId || typeof debtId !== 'string') {
     throw new Error('Invalid or missing debt ID');
   }
   const cleanId = debtId.replace(/[^a-zA-Z0-9_-]/g, '');
-  const now = new Date().toISOString();
   
-  // Try DML UPDATE first
   const updateSql = `
     UPDATE \`${BQ_CONFIG.projectId}.${BQ_CONFIG.datasetId}.debt_credit_ledger\`
     SET status = 'Settled', updated_at = CURRENT_TIMESTAMP()
-    WHERE id = '${cleanId}'
+    WHERE id = @debtId
   `;
   try {
-    await runQuery(updateSql);
-  } catch (dmlErr) {
-    // If running in sandbox without billing, fetch all records, modify in-memory, and replace table
-    console.warn(`[BigQuery] DML UPDATE notice for ${cleanId}, executing sandbox reload:`, dmlErr.message);
-    const selectSql = `SELECT * FROM \`${BQ_CONFIG.projectId}.${BQ_CONFIG.datasetId}.debt_credit_ledger\``;
-    const allRows = await runQuery(selectSql);
-    const updatedRows = allRows.map(r => {
-      if (r.id === cleanId) {
-        return { ...r, status: 'Settled', updated_at: now };
-      }
-      return r;
-    });
-    const tempFile = path.join(__dirname, `debts_reload_${Date.now()}.json`);
-    try {
-      fs.writeFileSync(tempFile, updatedRows.map(r => JSON.stringify(r)).join('\n'), 'utf8');
-      const loadCmd = `bq load --replace --project_id=${BQ_CONFIG.projectId} --location=${BQ_CONFIG.location} --source_format=NEWLINE_DELIMITED_JSON --label datacloud:antigravity ${BQ_CONFIG.projectId}:${BQ_CONFIG.datasetId}.debt_credit_ledger "${tempFile}"`;
-      execSync(loadCmd, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
-    } finally {
-      if (fs.existsSync(tempFile)) {
-        try { fs.unlinkSync(tempFile); } catch (_) {}
-      }
-    }
+    await runQuery(updateSql, { params: { debtId: cleanId } });
+  } catch (err) {
+    console.error(`[BigQuery] Failed to settle debt ${cleanId}:`, err.message);
+    throw err;
   }
 
   return {
     success: true,
     debtId: cleanId,
     status: 'Settled',
-    updatedAt: now
+    updatedAt: new Date().toISOString()
   };
 }
 
 /**
- * Delete a debt entry from debt_credit_ledger
+ * Delete a debt entry from debt_credit_ledger via SDK DML DELETE
  */
 export async function deleteDebt(debtId) {
   if (!debtId || typeof debtId !== 'string') {
@@ -1101,25 +1212,13 @@ export async function deleteDebt(debtId) {
 
   const deleteSql = `
     DELETE FROM \`${BQ_CONFIG.projectId}.${BQ_CONFIG.datasetId}.debt_credit_ledger\`
-    WHERE id = '${cleanId}'
+    WHERE id = @debtId
   `;
   try {
-    await runQuery(deleteSql);
-  } catch (dmlErr) {
-    console.warn(`[BigQuery] DML DELETE notice for debt ${cleanId}, executing sandbox reload:`, dmlErr.message);
-    const selectSql = `SELECT * FROM \`${BQ_CONFIG.projectId}.${BQ_CONFIG.datasetId}.debt_credit_ledger\``;
-    const allRows = await runQuery(selectSql);
-    const filteredRows = allRows.filter(r => r.id !== cleanId);
-    const tempFile = path.join(__dirname, `debts_del_${Date.now()}.json`);
-    try {
-      fs.writeFileSync(tempFile, filteredRows.map(r => JSON.stringify(r)).join('\n'), 'utf8');
-      const loadCmd = `bq load --replace --project_id=${BQ_CONFIG.projectId} --location=${BQ_CONFIG.location} --source_format=NEWLINE_DELIMITED_JSON --label datacloud:antigravity ${BQ_CONFIG.projectId}:${BQ_CONFIG.datasetId}.debt_credit_ledger "${tempFile}"`;
-      execSync(loadCmd, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
-    } finally {
-      if (fs.existsSync(tempFile)) {
-        try { fs.unlinkSync(tempFile); } catch (_) {}
-      }
-    }
+    await runQuery(deleteSql, { params: { debtId: cleanId } });
+  } catch (err) {
+    console.error(`[BigQuery] Failed to delete debt ${cleanId}:`, err.message);
+    throw err;
   }
 
   return {
@@ -1127,5 +1226,3 @@ export async function deleteDebt(debtId) {
     debtId: cleanId
   };
 }
-
-
