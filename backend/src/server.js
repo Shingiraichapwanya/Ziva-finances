@@ -53,6 +53,7 @@ const {
 // BigQuery helper & database service imports
 const {
   BQ_CONFIG,
+  SHEETS_CONFIG,
   runQuery,
   getExchangeRates,
   getAccounts,
@@ -70,6 +71,7 @@ const {
   getNonOperatingGains,
   getPerformanceSummary,
   verifyBigQueryConnectivity,
+  ensureExternalTablesConfigured,
   getTroubleshootingGuidance,
 } = require('./bigquery');
 
@@ -290,6 +292,30 @@ app.delete('/api/debts/:id', async (req, res) => {
     res.json(result);
   } catch (error) {
     console.error(`Error deleting debt ${req.params.id}:`, error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Google Sheets Ingestion & External Table Configuration endpoints
+app.get('/api/sheets/config', (req, res) => {
+  res.json({
+    spreadsheetId: SHEETS_CONFIG.spreadsheetId,
+    transactionsTab: SHEETS_CONFIG.transactionsTab,
+    debtsTab: SHEETS_CONFIG.debtsTab,
+    rangeTransactions: SHEETS_CONFIG.rangeTransactions,
+    rangeDebts: SHEETS_CONFIG.rangeDebts,
+    ingestionMode: 'GOOGLE_SHEETS_API',
+    readMode: 'BIGQUERY_EXTERNAL_TABLE'
+  });
+});
+
+app.post('/api/sheets/configure-external-tables', async (req, res) => {
+  try {
+    const spreadsheetId = req.body.spreadsheetId || SHEETS_CONFIG.spreadsheetId;
+    const result = await ensureExternalTablesConfigured(spreadsheetId);
+    res.json(result);
+  } catch (error) {
+    console.error('Error configuring external tables:', error);
     res.status(500).json({ error: error.message });
   }
 });

@@ -78,8 +78,8 @@ CREATE OR REPLACE TABLE `personal_finance.fct_exchange_rates` (
 PARTITION BY rate_date
 CLUSTER BY base_currency, quote_currency, rate_type;
 
--- 2.2 FCT_TRANSACTIONS
-CREATE OR REPLACE TABLE `personal_finance.fct_transactions` (
+-- 2.2 FCT_TRANSACTIONS (External Table linked to Google Sheets)
+CREATE OR REPLACE EXTERNAL TABLE `personal_finance.fct_transactions` (
   transaction_id              STRING NOT NULL,
   transaction_timestamp       TIMESTAMP NOT NULL,
   transaction_date            DATE NOT NULL,
@@ -106,11 +106,16 @@ CREATE OR REPLACE TABLE `personal_finance.fct_transactions` (
   tax_deductible_amount_usd   NUMERIC(18, 4),
   tax_invoice_number          STRING,
   notes                       STRING,
-  tags                        ARRAY<STRING>,
-  metadata                    JSON
+  tags                        STRING,
+  metadata                    STRING
 )
-PARTITION BY transaction_date
-CLUSTER BY cash_flow_tier, account_id, category_id;
+OPTIONS (
+  format = 'GOOGLE_SHEETS',
+  uris = ['https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms'],
+  skip_leading_rows = 1,
+  sheet_range = 'fct_transactions!A:AB',
+  description = "External table linked directly to Google Sheets for real-time transaction ledger reads."
+);
 
 -- 2.3 FCT_BUDGET_ALLOCATIONS
 CREATE OR REPLACE TABLE `personal_finance.fct_budget_allocations` (

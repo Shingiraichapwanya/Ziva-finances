@@ -5,7 +5,7 @@
  * Grounded in Google Cloud Project: budget-tracker-507418, Dataset: personal_finance
  * 
  * Provides:
- *  - Native SDK Ingestion (table.insert / insertRows) replacing CLI 'bq' calls
+ *  - Google Sheets API Ingestion (insertRows / appendTransaction) with BigQuery External Table reads
  *  - Daily & Monthly Burn Rate Calculations
  *  - Cash Runway Forecasting & Survival Date Projections
  *  - Monthly Spending Trends by Category & Month-over-Month Variance
@@ -16,6 +16,14 @@
 const { BigQuery } = require('@google-cloud/bigquery');
 const fs = require('fs');
 const path = require('path');
+const googleSheetsService = require('./googleSheetsService');
+
+// Authoritative OAuth Scopes enabling BigQuery queries against external Google Sheets tables
+const BQ_AUTH_SCOPES = [
+  'https://www.googleapis.com/auth/bigquery',
+  'https://www.googleapis.com/auth/drive.readonly',
+  'https://www.googleapis.com/auth/spreadsheets'
+];
 
 // 1. Authoritative BigQuery Configuration
 const BQ_CONFIG = {
@@ -60,6 +68,7 @@ function getBigQueryClient() {
           client_email: credentials.client_email,
           private_key: credentials.private_key,
         },
+        scopes: BQ_AUTH_SCOPES,
       });
       return bigqueryInstance;
     } catch (err) {
@@ -73,6 +82,7 @@ function getBigQueryClient() {
       projectId: BQ_CONFIG.projectId,
       location: BQ_CONFIG.location,
       keyFilename: process.env.GOOGLE_APPLICATION_CREDENTIALS,
+      scopes: BQ_AUTH_SCOPES,
     });
     return bigqueryInstance;
   }
@@ -94,6 +104,7 @@ function getBigQueryClient() {
             projectId: content.project_id || BQ_CONFIG.projectId,
             location: BQ_CONFIG.location,
             keyFilename: keyPath,
+            scopes: BQ_AUTH_SCOPES,
           });
           return bigqueryInstance;
         }
@@ -105,6 +116,7 @@ function getBigQueryClient() {
   bigqueryInstance = new BigQuery({
     projectId: BQ_CONFIG.projectId,
     location: BQ_CONFIG.location,
+    scopes: BQ_AUTH_SCOPES,
   });
   return bigqueryInstance;
 }
@@ -127,53 +139,35 @@ async function runQuery(sql, params = {}) {
 }
 
 /**
- * Inserts one or more rows directly into a BigQuery table using streaming insert.
- * Replaces any calls that previously shelled out to `bq insert` or `bq load`.
+ * Ingests one or more rows directly into the linked Google Sheet via Google Sheets API.
+ * Replaces direct BigQuery streaming inserts (table.insert) to ensure compatibility
+ * with external table storage.
  *
- * @param {string} tableName - e.g. 'fct_transactions'
+ * @param {string} tableName - e.g. 'fct_transactions' or 'debt_credit_ledger'
  * @param {Object|Object[]} rows - Single row object or array of row objects
- * @param {Object} [options] - Optional BigQuery insert options (e.g. raw, ignoreUnknownValues)
+ * @param {Object} [options] - Optional ingestion options
  */
 async function insertRows(tableName, rows, options = {}) {
-  const client = getBigQueryClient();
-  const dataset = client.dataset(BQ_CONFIG.datasetId);
-  const table = dataset.table(tableName);
-
   const payload = Array.isArray(rows) ? rows : [rows];
   if (payload.length === 0) return { inserted: 0 };
 
   try {
-    const defaultOptions = {
-      raw: false,
-      ignoreUnknownValues: true,
-      skipInvalidRows: false,
-      ...options,
-    };
-
-    const [apiResponse] = await table.insert(payload, defaultOptions);
+    const result = await googleSheetsService.insertRows(tableName, payload, options);
     return {
       success: true,
       insertedCount: payload.length,
-      response: apiResponse,
+      destination: 'GOOGLE_SHEETS',
+      tabName: tableName,
+      response: result
     };
   } catch (err) {
-    // BigQuery partial failure details are populated in err.errors
-    if (err.name === 'PartialFailureError' && err.errors) {
-      console.error(
-        `[financeService] Partial failure inserting into ${tableName}:`,
-        JSON.stringify(err.errors, null, 2)
-      );
-      throw new Error(
-        `BigQuery streaming insert failed for ${err.errors.length} rows: ${err.errors[0]?.errors[0]?.message || err.message}`
-      );
-    }
-    console.error(`[financeService] Error inserting rows into ${tableName}:`, err);
+    console.error(`[financeService] Error writing rows to Google Sheets for ${tableName}:`, err);
     throw err;
   }
 }
 
 /**
- * Insert a single transaction record into fct_transactions
+ * Insert a single transaction record into fct_transactions via Google Sheets API
  */
 async function recordTransaction(transactionData) {
   return insertRows('fct_transactions', transactionData);

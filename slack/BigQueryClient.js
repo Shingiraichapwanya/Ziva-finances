@@ -22,6 +22,13 @@ const BQ_CONFIG = {
   }
 };
 
+const SHEETS_CONFIG = {
+  spreadsheetId: (typeof PropertiesService !== 'undefined' && PropertiesService.getScriptProperties && PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID')) ||
+                 (typeof process !== 'undefined' && (process.env.GOOGLE_SHEETS_SPREADSHEET_ID || process.env.SPREADSHEET_ID)) ||
+                 '1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms',
+  transactionsTab: 'fct_transactions'
+};
+
 class BigQueryClient {
   /**
    * Fetch the latest effective exchange rates from BigQuery view.
@@ -169,76 +176,79 @@ class BigQueryClient {
       }, txData.metadata || {})
     };
 
-    // Attempt 1: Load Job via Apps Script BigQuery Service (Works in Free Sandbox!)
+    // Write directly to Google Sheets via SpreadsheetApp or Sheets Advanced Service
+    // BigQuery treats the linked Google Sheet as an external table for real-time reads
+    const rowValues = [
+      record.transaction_id,
+      record.transaction_timestamp,
+      record.transaction_date,
+      record.local_timezone,
+      record.local_timestamp,
+      record.settlement_timestamp,
+      record.account_id,
+      record.cash_flow_tier,
+      record.category_id,
+      record.transaction_type,
+      record.original_amount,
+      record.original_currency,
+      record.reporting_amount_usd,
+      record.reporting_amount_zar,
+      record.applied_exchange_rate_usd,
+      record.applied_exchange_rate_zar,
+      record.rate_type_applied,
+      record.transfer_counterpart_id || '',
+      record.merchant_or_payee,
+      record.payment_method,
+      record.statutory_levy_or_fee || '',
+      record.is_tax_deductible,
+      record.tax_deductible_amount_zar,
+      record.tax_deductible_amount_usd,
+      record.tax_invoice_number || '',
+      record.notes || '',
+      Array.isArray(record.tags) ? record.tags.join(',') : '',
+      typeof record.metadata === 'object' ? JSON.stringify(record.metadata) : record.metadata
+    ];
+
     try {
-      if (typeof BigQuery !== 'undefined' && BigQuery.Jobs) {
-        const ndjsonString = JSON.stringify(record) + '\n';
-        const blob = Utilities.newBlob(ndjsonString, 'application/json', 'record.json');
-
-        const jobResource = {
-          configuration: {
-            load: {
-              destinationTable: {
-                projectId: BQ_CONFIG.projectId,
-                datasetId: BQ_CONFIG.datasetId,
-                tableId: 'fct_transactions'
-              },
-              sourceFormat: 'NEWLINE_DELIMITED_JSON',
-              writeDisposition: 'WRITE_APPEND',
-              autodetect: false
-            }
-          }
-        };
-
-        const job = BigQuery.Jobs.insert(jobResource, BQ_CONFIG.projectId, blob);
+      // Strategy 1: Google Apps Script native SpreadsheetApp
+      if (typeof SpreadsheetApp !== 'undefined') {
+        const ss = SpreadsheetApp.openById(SHEETS_CONFIG.spreadsheetId);
+        const sheet = ss.getSheetByName(SHEETS_CONFIG.transactionsTab) || ss.getSheets()[0];
+        sheet.appendRow(rowValues);
         return {
           success: true,
           transactionId: txId,
-          jobId: job.jobReference ? job.jobReference.jobId : 'unknown',
+          destination: 'GOOGLE_SHEETS',
+          spreadsheetId: SHEETS_CONFIG.spreadsheetId,
+          tabName: SHEETS_CONFIG.transactionsTab,
           record: record,
           conversions: conversions
         };
       }
-    } catch (loadError) {
-      console.warn('BigQuery Load Job failed, attempting SQL DML fallback:', loadError.message);
-    }
 
-    // Attempt 2: SQL DML INSERT INTO (When billing is enabled)
-    try {
-      if (typeof BigQuery !== 'undefined' && BigQuery.Jobs) {
-        const invoiceVal = record.tax_invoice_number ? `'${record.tax_invoice_number.replace(/'/g, "\\'")}'` : 'NULL';
-        const dmlSql = `
-          INSERT INTO \`${BQ_CONFIG.projectId}.${BQ_CONFIG.datasetId}.fct_transactions\` (
-            transaction_id, transaction_timestamp, transaction_date, local_timezone, local_timestamp,
-            account_id, cash_flow_tier, category_id, transaction_type, original_amount, original_currency,
-            reporting_amount_usd, reporting_amount_zar, applied_exchange_rate_usd, applied_exchange_rate_zar,
-            rate_type_applied, merchant_or_payee, payment_method, is_tax_deductible,
-            tax_deductible_amount_zar, tax_deductible_amount_usd, tax_invoice_number,
-            notes, tags, metadata
-          ) VALUES (
-            '${txId}', TIMESTAMP '${timestampStr}', DATE '${dateStr}', '${BQ_CONFIG.defaultTimezone}', DATETIME '${localTimeStr}',
-            '${record.account_id}', '${record.cash_flow_tier}', '${record.category_id}', '${record.transaction_type}',
-            ${record.original_amount}, '${record.original_currency}', ${record.reporting_amount_usd}, ${record.reporting_amount_zar},
-            ${record.applied_exchange_rate_usd}, ${record.applied_exchange_rate_zar}, '${record.rate_type_applied}',
-            '${record.merchant_or_payee.replace(/'/g, "\\'")}', '${record.payment_method}',
-            ${record.is_tax_deductible}, ${record.tax_deductible_amount_zar}, ${record.tax_deductible_amount_usd}, ${invoiceVal},
-            '${record.notes.replace(/'/g, "\\'")}', ['${record.tags.join("','")}'],
-            JSON '${JSON.stringify(record.metadata).replace(/'/g, "\\'")}'
-          );
-        `;
-        BigQuery.Jobs.query({ query: dmlSql, useLegacySql: false, location: BQ_CONFIG.location }, BQ_CONFIG.projectId);
+      // Strategy 2: Google Sheets Advanced Service
+      if (typeof Sheets !== 'undefined' && Sheets.Spreadsheets) {
+        Sheets.Spreadsheets.Values.append(
+          { values: [rowValues] },
+          SHEETS_CONFIG.spreadsheetId,
+          `${SHEETS_CONFIG.transactionsTab}!A1`,
+          { valueInputOption: 'USER_ENTERED', insertDataOption: 'INSERT_ROWS' }
+        );
         return {
           success: true,
           transactionId: txId,
+          destination: 'GOOGLE_SHEETS',
+          spreadsheetId: SHEETS_CONFIG.spreadsheetId,
+          tabName: SHEETS_CONFIG.transactionsTab,
           record: record,
           conversions: conversions
         };
       }
-    } catch (dmlError) {
-      console.error('BigQuery DML Insert also failed:', dmlError.message);
+    } catch (sheetError) {
+      console.error('Google Sheets write failed:', sheetError.message);
       return {
         success: false,
-        error: `BigQuery ingestion failed: ${dmlError.message}`,
+        error: `Google Sheets write failed: ${sheetError.message}`,
         record: record
       };
     }
@@ -247,6 +257,7 @@ class BigQueryClient {
     return {
       success: true,
       transactionId: txId,
+      destination: 'GOOGLE_SHEETS',
       record: record,
       conversions: conversions,
       isMock: true
@@ -300,5 +311,5 @@ class BigQueryClient {
 
 // CommonJS export for testing
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { BigQueryClient, BQ_CONFIG };
+  module.exports = { BigQueryClient, BQ_CONFIG, SHEETS_CONFIG };
 }

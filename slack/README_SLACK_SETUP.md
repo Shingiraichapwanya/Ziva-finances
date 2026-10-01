@@ -15,15 +15,20 @@ This directory contains the serverless Slack integration layer for the Personal 
          │ Rich Block Kit Response                  │  - SlackFormatter.js (Block UI)   │
          │ (Conversion, Envelope Status)            └─────────────────┬─────────────────┘
          │                                                            │
-┌────────┴────────┐                                                   │ Loads NDJSON Record
-│ Slack Channel   │ ◄─────────────────────────────────────────────────┘ (Sandbox-compatible Load Job)
-└─────────────────┘                                                   ▼
-                                                    ┌───────────────────────────────────┐
-                                                    │ Google BigQuery (africa-south1)   │
-                                                    │  - fct_transactions               │
-                                                    │  - v_monthly_budget_vs_actual     │
-                                                    │  - v_latest_effective_exchange_...│
-                                                    └───────────────────────────────────┘
+┌────────┴────────┐                                                   │ Writes Row via Sheets API
+│ Slack Channel   │ ◄──────────────────────────────┐                  ▼
+└─────────────────┘                                │  ┌───────────────────────────────────┐
+                                                   │  │ Google Sheets Ingestion Layer     │
+                                                   │  │  - fct_transactions tab          │
+                                                   │  └─────────────────┬─────────────────┘
+                                                   │                    │ Real-Time External Read
+                                                   │                    ▼
+                                                   │  ┌───────────────────────────────────┐
+                                                   └─ │ Google BigQuery (External Table)  │
+                                                      │  - fct_transactions (ext table)   │
+                                                      │  - v_monthly_budget_vs_actual     │
+                                                      │  - v_latest_effective_exchange_...│
+                                                      └───────────────────────────────────┘
 ```
 
 ---
@@ -32,13 +37,13 @@ This directory contains the serverless Slack integration layer for the Personal 
 
 | File | Purpose |
 | :--- | :--- |
-| [`Parser.js`](file:///C:/Users/shing/.gemini/antigravity-ide/scratch/personal-budget-tracker-bigquery/slack/Parser.js) | Tokenizer & NLP parser. Extracts amounts, currencies (ZAR, USD, ZiG), merchant, notes, and maps to warehouse dimensions & cash-flow tiers. |
-| [`BigQueryClient.js`](file:///C:/Users/shing/.gemini/antigravity-ide/scratch/personal-budget-tracker-bigquery/slack/BigQueryClient.js) | BigQuery service integration. Fetches active exchange rates, performs multi-currency normalization, ingests into `fct_transactions` via Load Jobs, and checks budget status. |
-| [`SlackFormatter.js`](file:///C:/Users/shing/.gemini/antigravity-ide/scratch/personal-budget-tracker-bigquery/slack/SlackFormatter.js) | Generates Slack Block Kit UI components: transaction cards, visual budget progress bar (`🟢 On Track`, `🟡 Near Limit`, `🔴 OVER BUDGET`), and error/help views. |
-| [`Code.js`](file:///C:/Users/shing/.gemini/antigravity-ide/scratch/personal-budget-tracker-bigquery/slack/Code.js) | Master Google Apps Script entry point. Handles `doPost(e)` for Slash commands (`/spend`) and Event API callbacks (`@BudgetBot`), plus `doGet(e)` health checks. |
-| [`appsscript.json`](file:///C:/Users/shing/.gemini/antigravity-ide/scratch/personal-budget-tracker-bigquery/slack/appsscript.json) | Apps Script manifest defining the V8 runtime, BigQuery v2 advanced service, and required OAuth scopes. |
-| [`slack_app_manifest.json`](file:///C:/Users/shing/.gemini/antigravity-ide/scratch/personal-budget-tracker-bigquery/slack/slack_app_manifest.json) | Ready-to-use Slack App Manifest for 1-click import in the Slack API console. |
-| [`tests/`](file:///C:/Users/shing/.gemini/antigravity-ide/scratch/personal-budget-tracker-bigquery/slack/tests) | Automated unit tests for parser and Block Kit formatting (`test_parser.js`, `test_formatter_and_flow.js`). |
+| `Parser.js` | Tokenizer & NLP parser. Extracts amounts, currencies (ZAR, USD, ZiG), merchant, notes, and maps to warehouse dimensions & cash-flow tiers. |
+| `BigQueryClient.js` | Ingestion & query integration. Normalizes currency rates, appends transactions directly to Google Sheets (`fct_transactions`) via Sheets API, and queries live budget metrics via BigQuery external table. |
+| `SlackFormatter.js` | Generates Slack Block Kit UI components: transaction cards, visual budget progress bar (`🟢 On Track`, `🟡 Near Limit`, `🔴 OVER BUDGET`), and error/help views. |
+| `Code.js` | Master Google Apps Script entry point. Handles `doPost(e)` for Slash commands (`/spend`) and Event API callbacks (`@BudgetBot`), plus `doGet(e)` health checks. |
+| `appsscript.json` | Apps Script manifest defining the V8 runtime, BigQuery v2 & Sheets v4 advanced services, and required OAuth scopes (BigQuery, Sheets, Drive). |
+| `slack_app_manifest.json` | Ready-to-use Slack App Manifest for 1-click import in the Slack API console. |
+| `tests/` | Automated unit tests for parser and Block Kit formatting (`test_parser.js`, `test_formatter_and_flow.js`). |
 
 ---
 

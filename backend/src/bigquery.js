@@ -1,8 +1,8 @@
 /**
- * bigquery.js - BigQuery Service Layer for Ziva Finance
+ * bigquery.js - BigQuery Service Layer & Google Sheets External Table Integration for Ziva Finance
  * Grounded in Google Cloud Project: budget-tracker-507418, dataset: personal_finance
  * Enforces mandatory resource attribution labels ('datacloud: antigravity')
- * Relies strictly on the official @google-cloud/bigquery Node.js SDK without CLI or shell commands.
+ * Directs ledger writes to Google Sheets API and reads dynamically via BigQuery External Tables.
  */
 
 import { BigQuery } from '@google-cloud/bigquery';
@@ -12,6 +12,21 @@ import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+import {
+  SHEETS_CONFIG,
+  appendTransaction as appendTransactionToSheets,
+  appendDebt as appendDebtToSheets,
+} from './googleSheets.js';
+
+export { SHEETS_CONFIG };
+
+// Scopes required for BigQuery to read external tables linked to Google Sheets/Drive
+const BQ_AUTH_SCOPES = [
+  'https://www.googleapis.com/auth/bigquery',
+  'https://www.googleapis.com/auth/drive.readonly',
+  'https://www.googleapis.com/auth/spreadsheets'
+];
 
 export const BQ_CONFIG = {
   projectId: process.env.GCP_PROJECT_ID || process.env.BIGQUERY_PROJECT_ID || 'budget-tracker-507418',
@@ -103,7 +118,8 @@ export function getBigQueryClient(forceRefresh = false) {
     activeClientInstance = new BigQuery({
       projectId: BQ_CONFIG.projectId,
       location: BQ_CONFIG.location,
-      keyFilename: authDetails.keyFile
+      keyFilename: authDetails.keyFile,
+      scopes: BQ_AUTH_SCOPES
     });
   } else if (authDetails.mode === 'CREDENTIALS_OBJECT') {
     activeClientInstance = new BigQuery({
@@ -112,12 +128,14 @@ export function getBigQueryClient(forceRefresh = false) {
       credentials: {
         client_email: authDetails.credentials.client_email,
         private_key: authDetails.credentials.private_key
-      }
+      },
+      scopes: BQ_AUTH_SCOPES
     });
   } else {
     activeClientInstance = new BigQuery({
       projectId: BQ_CONFIG.projectId,
-      location: BQ_CONFIG.location
+      location: BQ_CONFIG.location,
+      scopes: BQ_AUTH_SCOPES
     });
   }
 
@@ -446,7 +464,7 @@ export async function getTransactions(limit = 100) {
     isTaxDeductible: Boolean(r.isTaxDeductible),
     receiptStorageUrl: r.receiptStorageUrl || null,
     receiptFileType: r.receiptFileType || null,
-    tags: Array.isArray(r.tags) ? r.tags : []
+    tags: Array.isArray(r.tags) ? r.tags : (typeof r.tags === 'string' ? (r.tags.startsWith('[') ? (() => { try { return JSON.parse(r.tags); } catch (_) { return [r.tags]; } })() : r.tags.split(',').map(s => s.trim()).filter(Boolean)) : [])
   }));
 }
 
@@ -689,111 +707,24 @@ export async function insertTransaction(txData) {
     }
   };
 
-  const { client } = getBigQueryClient();
-
-  // Try SQL DML INSERT first via BigQuery query engine (avoids streaming buffer mutation lock)
-  const dmlSql = `
-    INSERT INTO \`${BQ_CONFIG.projectId}.${BQ_CONFIG.datasetId}.fct_transactions\` (
-      transaction_id, transaction_timestamp, transaction_date, local_timezone, local_timestamp,
-      settlement_timestamp, account_id, cash_flow_tier, category_id, transaction_type,
-      original_amount, original_currency, reporting_amount_usd, reporting_amount_zar,
-      applied_exchange_rate_usd, applied_exchange_rate_zar, rate_type_applied,
-      transfer_counterpart_id, merchant_or_payee, payment_method, statutory_levy_or_fee,
-      is_tax_deductible, tax_deductible_amount_zar, tax_deductible_amount_usd,
-      tax_invoice_number, notes, tags, metadata
-    ) VALUES (
-      @transaction_id,
-      TIMESTAMP(@transaction_timestamp),
-      DATE(@transaction_date),
-      @local_timezone,
-      DATETIME(@local_timestamp),
-      TIMESTAMP(@settlement_timestamp),
-      @account_id,
-      @cash_flow_tier,
-      @category_id,
-      @transaction_type,
-      @original_amount,
-      @original_currency,
-      @reporting_amount_usd,
-      @reporting_amount_zar,
-      @applied_exchange_rate_usd,
-      @applied_exchange_rate_zar,
-      @rate_type_applied,
-      @transfer_counterpart_id,
-      @merchant_or_payee,
-      @payment_method,
-      @statutory_levy_or_fee,
-      @is_tax_deductible,
-      @tax_deductible_amount_zar,
-      @tax_deductible_amount_usd,
-      @tax_invoice_number,
-      @notes,
-      @tags,
-      PARSE_JSON(@metadata_json)
-    )
-  `;
-
-  const queryParams = {
-    transaction_id: record.transaction_id,
-    transaction_timestamp: timestampStr,
-    transaction_date: dateStr,
-    local_timezone: record.local_timezone,
-    local_timestamp: localTimeStr,
-    settlement_timestamp: timestampStr,
-    account_id: record.account_id,
-    cash_flow_tier: record.cash_flow_tier,
-    category_id: record.category_id,
-    transaction_type: record.transaction_type,
-    original_amount: record.original_amount,
-    original_currency: record.original_currency,
-    reporting_amount_usd: record.reporting_amount_usd,
-    reporting_amount_zar: record.reporting_amount_zar,
-    applied_exchange_rate_usd: record.applied_exchange_rate_usd,
-    applied_exchange_rate_zar: record.applied_exchange_rate_zar,
-    rate_type_applied: record.rate_type_applied,
-    transfer_counterpart_id: record.transfer_counterpart_id,
-    merchant_or_payee: record.merchant_or_payee,
-    payment_method: record.payment_method,
-    statutory_levy_or_fee: record.statutory_levy_or_fee,
-    is_tax_deductible: record.is_tax_deductible,
-    tax_deductible_amount_zar: record.tax_deductible_amount_zar,
-    tax_deductible_amount_usd: record.tax_deductible_amount_usd,
-    tax_invoice_number: record.tax_invoice_number,
-    notes: record.notes,
-    tags: record.tags,
-    metadata_json: JSON.stringify(record.metadata)
-  };
-
+  // Write transaction record to Google Sheets API (replaces direct BigQuery DML & table.insert)
   try {
-    await runQuery(dmlSql, { params: queryParams });
+    const sheetsResult = await appendTransactionToSheets(record);
     return {
       success: true,
       transactionId: txId,
-      record: record
+      destination: 'GOOGLE_SHEETS',
+      spreadsheetId: SHEETS_CONFIG.spreadsheetId,
+      tabName: SHEETS_CONFIG.transactionsTab,
+      record: record,
+      sheetsResult
     };
-  } catch (dmlErr) {
-    // If DML fails (e.g. streaming buffer conflict or billing sandbox limitation), attempt SDK streaming insert
-    console.warn('[BigQuery] DML INSERT failed, attempting SDK table.insert fallback:', dmlErr.message);
-    try {
-      const table = client.dataset(BQ_CONFIG.datasetId).table('fct_transactions');
-      await table.insert([record]);
-      return {
-        success: true,
-        transactionId: txId,
-        record: record
-      };
-    } catch (insertErr) {
-      console.error('[BigQuery] Transaction insertion failed on both DML and table.insert via SDK:');
-      console.error('DML Error:', dmlErr.message);
-      console.error('Insert Error:', insertErr.message);
-      if (insertErr.errors) {
-        console.error('Insert Error Details:', JSON.stringify(insertErr.errors));
-      }
-      const enhancedError = new Error(`BigQuery Ingest Failed: ${dmlErr.message || insertErr.message}`);
-      enhancedError.code = dmlErr.code || insertErr.code || 'INGEST_FAILED';
-      enhancedError.troubleshooting = getTroubleshootingGuidance(dmlErr || insertErr);
-      throw enhancedError;
-    }
+  } catch (sheetsErr) {
+    console.error('[GoogleSheets Ingestion] Transaction insertion failed:', sheetsErr.message);
+    const enhancedError = new Error(`Google Sheets Ingest Failed: ${sheetsErr.message}`);
+    enhancedError.code = 'SHEETS_INGEST_FAILED';
+    enhancedError.troubleshooting = `Verify GOOGLE_SHEETS_SPREADSHEET_ID (${SHEETS_CONFIG.spreadsheetId}) exists and has edit permissions granted to the service account.`;
+    throw enhancedError;
   }
 }
 
@@ -1115,60 +1046,24 @@ export async function insertDebt(debtData) {
     updated_at: now
   };
 
-  const { client } = getBigQueryClient();
-
-  // Try SQL DML INSERT first via BigQuery SDK
-  const dmlSql = `
-    INSERT INTO \`${BQ_CONFIG.projectId}.${BQ_CONFIG.datasetId}.debt_credit_ledger\` (
-      id, person_name, direction, amount, currency, date, status, notes, created_at, updated_at
-    ) VALUES (
-      @id, @person_name, @direction, @amount, @currency, DATE(@date), @status, @notes,
-      TIMESTAMP(@created_at), TIMESTAMP(@updated_at)
-    )
-  `;
-
-  const queryParams = {
-    id: record.id,
-    person_name: record.person_name,
-    direction: record.direction,
-    amount: record.amount,
-    currency: record.currency,
-    date: record.date,
-    status: record.status,
-    notes: record.notes,
-    created_at: record.created_at,
-    updated_at: record.updated_at
-  };
-
+  // Write debt record to Google Sheets API (replaces direct BigQuery DML & table.insert)
   try {
-    await runQuery(dmlSql, { params: queryParams });
+    const sheetsResult = await appendDebtToSheets(record);
     return {
       success: true,
       debtId: debtId,
-      record: record
+      destination: 'GOOGLE_SHEETS',
+      spreadsheetId: SHEETS_CONFIG.spreadsheetId,
+      tabName: SHEETS_CONFIG.debtsTab,
+      record: record,
+      sheetsResult
     };
-  } catch (dmlErr) {
-    console.warn('[BigQuery] DML INSERT for debt failed, attempting SDK table.insert fallback:', dmlErr.message);
-    try {
-      const table = client.dataset(BQ_CONFIG.datasetId).table('debt_credit_ledger');
-      await table.insert([record]);
-      return {
-        success: true,
-        debtId: debtId,
-        record: record
-      };
-    } catch (insertErr) {
-      console.error('[BigQuery] Debt insertion failed on both DML and table.insert via SDK:');
-      console.error('DML Error:', dmlErr.message);
-      console.error('Insert Error:', insertErr.message);
-      if (insertErr.errors) {
-        console.error('Insert Error Details:', JSON.stringify(insertErr.errors));
-      }
-      const enhancedError = new Error(`BigQuery Insert Debt Failed: ${dmlErr.message || insertErr.message}`);
-      enhancedError.code = dmlErr.code || insertErr.code || 'INSERT_DEBT_FAILED';
-      enhancedError.troubleshooting = getTroubleshootingGuidance(dmlErr || insertErr);
-      throw enhancedError;
-    }
+  } catch (sheetsErr) {
+    console.error('[GoogleSheets Ingestion] Debt insertion failed:', sheetsErr.message);
+    const enhancedError = new Error(`Google Sheets Insert Debt Failed: ${sheetsErr.message}`);
+    enhancedError.code = 'SHEETS_INSERT_DEBT_FAILED';
+    enhancedError.troubleshooting = `Verify GOOGLE_SHEETS_SPREADSHEET_ID (${SHEETS_CONFIG.spreadsheetId}) exists and has edit permissions granted to the service account.`;
+    throw enhancedError;
   }
 }
 
@@ -1226,3 +1121,86 @@ export async function deleteDebt(debtId) {
     debtId: cleanId
   };
 }
+
+/**
+ * Configure BigQuery external tables linked to Google Sheets for reading data in real-time.
+ * Treats fct_transactions and debt_credit_ledger as external tables backed by Google Sheets.
+ *
+ * @param {string} [spreadsheetId] - Optional Google Sheet ID, defaults to SHEETS_CONFIG.spreadsheetId
+ * @returns {Promise<{success: boolean, spreadsheetId: string, configuredTables: string[]}>}
+ */
+export async function ensureExternalTablesConfigured(spreadsheetId = SHEETS_CONFIG.spreadsheetId) {
+  const fctTransactionsDdl = `
+    CREATE OR REPLACE EXTERNAL TABLE \`${BQ_CONFIG.projectId}.${BQ_CONFIG.datasetId}.fct_transactions\` (
+      transaction_id              STRING NOT NULL OPTIONS(description="Unique transaction ID"),
+      transaction_timestamp       TIMESTAMP NOT NULL OPTIONS(description="Point-in-time event timestamp in UTC"),
+      transaction_date            DATE NOT NULL OPTIONS(description="Calendar date of transaction"),
+      local_timezone              STRING NOT NULL OPTIONS(description="Local civil timezone"),
+      local_timestamp             DATETIME NOT NULL OPTIONS(description="Local civil timestamp"),
+      settlement_timestamp        TIMESTAMP OPTIONS(description="Settlement timestamp in UTC"),
+      account_id                  STRING NOT NULL OPTIONS(description="Foreign key to dim_accounts"),
+      cash_flow_tier              STRING NOT NULL OPTIONS(description="Cash flow designation"),
+      category_id                 STRING NOT NULL OPTIONS(description="Foreign key to dim_categories"),
+      transaction_type            STRING NOT NULL OPTIONS(description="Transaction type"),
+      original_amount             NUMERIC(18, 4) NOT NULL OPTIONS(description="Amount in account currency"),
+      original_currency           STRING NOT NULL OPTIONS(description="Currency code"),
+      reporting_amount_usd        NUMERIC(18, 4) NOT NULL OPTIONS(description="Normalized USD amount"),
+      reporting_amount_zar        NUMERIC(18, 4) NOT NULL OPTIONS(description="Normalized ZAR amount"),
+      applied_exchange_rate_usd   NUMERIC(18, 6) NOT NULL OPTIONS(description="USD conversion rate"),
+      applied_exchange_rate_zar   NUMERIC(18, 6) NOT NULL OPTIONS(description="ZAR conversion rate"),
+      rate_type_applied           STRING NOT NULL OPTIONS(description="Conversion rate regime"),
+      transfer_counterpart_id     STRING OPTIONS(description="Transfer counterpart ID"),
+      merchant_or_payee           STRING NOT NULL OPTIONS(description="Merchant or payee name"),
+      payment_method              STRING NOT NULL OPTIONS(description="Payment channel"),
+      statutory_levy_or_fee       NUMERIC(18, 4) OPTIONS(description="Levy or statutory tax"),
+      is_tax_deductible           BOOL NOT NULL OPTIONS(description="Tax deduction eligibility"),
+      tax_deductible_amount_zar   NUMERIC(18, 4) OPTIONS(description="Tax deductible portion in ZAR"),
+      tax_deductible_amount_usd   NUMERIC(18, 4) OPTIONS(description="Tax deductible portion in USD"),
+      tax_invoice_number          STRING OPTIONS(description="Tax invoice reference number"),
+      notes                       STRING OPTIONS(description="Personal notes or narrative"),
+      tags                        STRING OPTIONS(description="Tags list or comma-separated string"),
+      metadata                    STRING OPTIONS(description="Raw provider JSON payload as string")
+    )
+    OPTIONS (
+      format = 'GOOGLE_SHEETS',
+      uris = ['https://docs.google.com/spreadsheets/d/${spreadsheetId}'],
+      skip_leading_rows = 1,
+      sheet_range = '${SHEETS_CONFIG.rangeTransactions}',
+      description = "External BigQuery table linked to Google Sheets for real-time transaction ledger reads."
+    );
+  `;
+
+  const debtLedgerDdl = `
+    CREATE OR REPLACE EXTERNAL TABLE \`${BQ_CONFIG.projectId}.${BQ_CONFIG.datasetId}.debt_credit_ledger\` (
+      id                          STRING NOT NULL OPTIONS(description="Debt record ID"),
+      person_name                 STRING NOT NULL OPTIONS(description="Counterparty name"),
+      direction                   STRING NOT NULL OPTIONS(description="owed_by_me or owed_to_me"),
+      amount                      NUMERIC(18, 4) NOT NULL OPTIONS(description="Principal amount"),
+      currency                    STRING NOT NULL OPTIONS(description="Currency code"),
+      date                        DATE NOT NULL OPTIONS(description="Entry date"),
+      status                      STRING NOT NULL OPTIONS(description="Pending or Settled"),
+      notes                       STRING OPTIONS(description="Notes memo"),
+      created_at                  TIMESTAMP OPTIONS(description="Created timestamp"),
+      updated_at                  TIMESTAMP OPTIONS(description="Updated timestamp")
+    )
+    OPTIONS (
+      format = 'GOOGLE_SHEETS',
+      uris = ['https://docs.google.com/spreadsheets/d/${spreadsheetId}'],
+      skip_leading_rows = 1,
+      sheet_range = '${SHEETS_CONFIG.rangeDebts}',
+      description = "External BigQuery table linked to Google Sheets for real-time debt/credit ledger reads."
+    );
+  `;
+
+  console.log(`[BigQuery] Applying external table configuration for Google Sheet: ${spreadsheetId}...`);
+  await runQuery(fctTransactionsDdl);
+  await runQuery(debtLedgerDdl);
+  console.log('[BigQuery] Successfully configured fct_transactions and debt_credit_ledger external tables.');
+
+  return {
+    success: true,
+    spreadsheetId,
+    configuredTables: ['fct_transactions', 'debt_credit_ledger']
+  };
+}
+

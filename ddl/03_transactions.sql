@@ -1,21 +1,22 @@
 -- =============================================================================
 -- BigQuery Schema: Personal Budget Tracker
 -- Script: 03_transactions.sql
--- Description: Core partitioned and clustered financial ledger for all cash flows.
+-- Description: External table linked to Google Sheets for live financial ledger reads.
 -- =============================================================================
 
 -- -----------------------------------------------------------------------------
--- FCT_TRANSACTIONS
+-- FCT_TRANSACTIONS (External Table backed by Google Sheets)
 -- Unified double-entry / multi-account transaction ledger.
 --
--- Partitioning & Clustering Strategy:
---  - PARTITION BY transaction_date (enables date-range pruning)
---  - CLUSTER BY cash_flow_tier, account_id, category_id (enables lightning-fast tier analysis)
+-- External Table Strategy:
+--  - Ingestion occurs directly to Google Sheets via Google Sheets API v4.
+--  - BigQuery reads the linked Google Sheet dynamically at query time.
+--  - Real-time updates with zero streaming buffer locks or quota restrictions.
 -- -----------------------------------------------------------------------------
-CREATE OR REPLACE TABLE `personal_finance.fct_transactions` (
+CREATE OR REPLACE EXTERNAL TABLE `personal_finance.fct_transactions` (
   transaction_id              STRING NOT NULL OPTIONS(description="Unique transaction ID (UUID or bank statement unique hash)"),
   transaction_timestamp       TIMESTAMP NOT NULL OPTIONS(description="Point-in-time event timestamp in UTC"),
-  transaction_date            DATE NOT NULL OPTIONS(description="Calendar date of transaction (used for BigQuery partition pruning)"),
+  transaction_date            DATE NOT NULL OPTIONS(description="Calendar date of transaction"),
   local_timezone              STRING NOT NULL OPTIONS(description="Local timezone of the transaction, typically 'Africa/Johannesburg' or 'Africa/Harare' (CAT / UTC+2)"),
   local_timestamp             DATETIME NOT NULL OPTIONS(description="Local civil timestamp when transaction took place"),
   settlement_timestamp        TIMESTAMP OPTIONS(description="Bank clearing or value settlement timestamp in UTC"),
@@ -53,11 +54,13 @@ CREATE OR REPLACE TABLE `personal_finance.fct_transactions` (
   tax_invoice_number          STRING OPTIONS(description="Tax invoice or receipt reference number for SARS/ZIMRA audit trail"),
 
   notes                       STRING OPTIONS(description="Personal memo or transaction narrative"),
-  tags                        ARRAY<STRING> OPTIONS(description="Flexible labels e.g. ['vacation', 'tax-deductible', 'reimbursable', 'medical']"),
-  metadata                    JSON OPTIONS(description="Raw provider JSON payload (e.g. EcoCash SMS ref, Capitec statement reference, geolocation)")
+  tags                        STRING OPTIONS(description="Comma-separated or JSON string list of labels"),
+  metadata                    STRING OPTIONS(description="Raw provider JSON payload stored as string from Google Sheets")
 )
-PARTITION BY transaction_date
-CLUSTER BY cash_flow_tier, account_id, category_id
-OPTIONS(
-  description = "Granular financial ledger capturing all cash flows across Daily Spending, Monthly Allocations, and Long-Term Vault."
+OPTIONS (
+  format = 'GOOGLE_SHEETS',
+  uris = ['https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms'],
+  skip_leading_rows = 1,
+  sheet_range = 'fct_transactions!A:AB',
+  description = "Granular financial ledger capturing all cash flows across Daily Spending, Monthly Allocations, and Long-Term Vault, read in real-time from linked Google Sheet."
 );
