@@ -25,7 +25,7 @@ const BQ_CONFIG = {
 const SHEETS_CONFIG = {
   spreadsheetId: (typeof PropertiesService !== 'undefined' && PropertiesService.getScriptProperties && PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID')) ||
                  (typeof process !== 'undefined' && (process.env.GOOGLE_SHEETS_SPREADSHEET_ID || process.env.SPREADSHEET_ID)) ||
-                 '1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms',
+                 '1OjPfL4plcH33vm9KpZv2_Y435Xl10uaA1UC-Nl8kUrE',
   transactionsTab: 'fct_transactions'
 };
 

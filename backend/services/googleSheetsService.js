@@ -19,7 +19,7 @@ const https = require('https');
 
 // 1. Authoritative Configuration
 const SHEETS_CONFIG = {
-  spreadsheetId: process.env.GOOGLE_SHEETS_SPREADSHEET_ID || process.env.SPREADSHEET_ID || '1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms',
+  spreadsheetId: process.env.GOOGLE_SHEETS_SPREADSHEET_ID || process.env.SPREADSHEET_ID || '1OjPfL4plcH33vm9KpZv2_Y435Xl10uaA1UC-Nl8kUrE',
   transactionsTab: process.env.GOOGLE_SHEETS_TRANSACTIONS_TAB || 'fct_transactions',
   debtsTab: process.env.GOOGLE_SHEETS_DEBTS_TAB || 'debt_credit_ledger',
   rangeTransactions: 'fct_transactions!A:AB',

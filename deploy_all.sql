@@ -111,7 +111,7 @@ CREATE OR REPLACE EXTERNAL TABLE `personal_finance.fct_transactions` (
 )
 OPTIONS (
   format = 'GOOGLE_SHEETS',
-  uris = ['https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms'],
+  uris = ['https://docs.google.com/spreadsheets/d/1OjPfL4plcH33vm9KpZv2_Y435Xl10uaA1UC-Nl8kUrE'],
   skip_leading_rows = 1,
   sheet_range = 'fct_transactions!A:AB',
   description = "External table linked directly to Google Sheets for real-time transaction ledger reads."
