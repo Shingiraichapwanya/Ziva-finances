@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   LayoutDashboard,
   WalletCards,
@@ -8,7 +8,9 @@ import {
   Landmark,
   Gem,
   LineChart,
-  Settings
+  Settings,
+  X,
+  Sparkles
 } from 'lucide-react';
 
 export type NavTab = 'dashboard' | 'accounts' | 'ledger' | 'debts' | 'budgets' | 'tax' | 'wealth' | 'analytics' | 'settings';
@@ -16,9 +18,72 @@ export type NavTab = 'dashboard' | 'accounts' | 'ledger' | 'debts' | 'budgets' |
 interface SidebarProps {
   currentTab: NavTab;
   onSelectTab: (tab: NavTab) => void;
+  isOpen?: boolean;
+  onClose?: () => void;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ currentTab, onSelectTab }) => {
+export const Sidebar: React.FC<SidebarProps> = ({
+  currentTab,
+  onSelectTab,
+  isOpen = false,
+  onClose
+}) => {
+  const closeBtnRef = useRef<HTMLButtonElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+
+  // Close on Escape key press
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose?.();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
+  // Lock background scroll, focus close button on open, and restore focus to menu button on close
+  useEffect(() => {
+    if (isOpen) {
+      const active = document.activeElement;
+      previousFocusRef.current = (active && active !== document.body ? (active as HTMLElement) : null) || document.getElementById('mobile-nav-toggle-btn');
+      const originalOverflow = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+
+      const timer = setTimeout(() => {
+        closeBtnRef.current?.focus();
+      }, 50);
+
+      return () => {
+        clearTimeout(timer);
+        document.body.style.overflow = originalOverflow;
+        setTimeout(() => {
+          const trigger = (previousFocusRef.current && previousFocusRef.current !== document.body)
+            ? previousFocusRef.current
+            : document.getElementById('mobile-nav-toggle-btn');
+          if (trigger && typeof trigger.focus === 'function') {
+            trigger.focus();
+          }
+        }, 10);
+      };
+    }
+  }, [isOpen]);
+
+  // Ensure breakpoint changes (resizing to desktop) do not leave backdrop or scroll lock behind
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth > 1024) {
+        if (isOpen) {
+          onClose?.();
+        }
+        document.body.style.overflow = '';
+      }
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [isOpen, onClose]);
+
   const navItems = [
     { id: 'dashboard' as NavTab, label: 'Dashboard', icon: LayoutDashboard },
     { id: 'accounts' as NavTab, label: 'Accounts & Tiers', icon: WalletCards },
@@ -31,43 +96,98 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentTab, onSelectTab }) => 
     { id: 'settings' as NavTab, label: 'Settings & Cloud', icon: Settings }
   ];
 
-  return (
-    <aside className="sidebar">
-      <nav className="sidebar-nav">
-        <div className="nav-group-title">COMMAND CENTER</div>
-        {navItems.map((item) => {
-          const Icon = item.icon;
-          const isActive = currentTab === item.id;
-          return (
-            <button
-              key={item.id}
-              type="button"
-              className={`nav-item ${isActive ? 'active' : ''} ${item.highlight ? 'nav-item-highlight' : ''}`}
-              onClick={() => onSelectTab(item.id)}
-              id={`nav-tab-${item.id}`}
-            >
-              <Icon size={18} className="nav-icon" />
-              <span className="nav-label">{item.label}</span>
-              {item.highlight && <span className="nav-badge-new">PRO</span>}
-            </button>
-          );
-        })}
-      </nav>
+  const [isMobile, setIsMobile] = useState(() =>
+    typeof window !== 'undefined' ? window.innerWidth <= 1024 : false
+  );
 
-      {/* Warehouse Anchor Footer */}
-      <div className="sidebar-footer">
-        <div className="warehouse-info-card">
-          <div className="wh-header">
-            <span className="wh-dot pulse-live" />
-            <span className="wh-title">BigQuery Data Warehouse</span>
+  useEffect(() => {
+    const mql = window.matchMedia('(max-width: 1024px)');
+    const onChange = (e: MediaQueryListEvent) => {
+      setIsMobile(e.matches);
+    };
+    mql.addEventListener('change', onChange);
+    setIsMobile(mql.matches);
+    return () => mql.removeEventListener('change', onChange);
+  }, []);
+
+  return (
+    <>
+      {/* Mobile Drawer Backdrop */}
+      {isOpen && (
+        <div
+          className="sidebar-backdrop"
+          onClick={onClose}
+          aria-hidden="true"
+        />
+      )}
+
+      <aside
+        id="mobile-sidebar-drawer"
+        className={`sidebar ${isOpen ? 'mobile-open' : ''}`}
+        role={isMobile ? (isOpen ? 'dialog' : undefined) : undefined}
+        aria-modal={isMobile && isOpen ? 'true' : undefined}
+        aria-label="Navigation drawer"
+        aria-hidden={isMobile && !isOpen ? 'true' : undefined}
+        inert={isMobile && !isOpen ? true : undefined}
+      >
+        {/* Mobile Drawer Header with Close Button */}
+        <div className="mobile-drawer-header">
+          <div className="drawer-brand">
+            <div className="brand-logo-gem">
+              <Sparkles size={16} className="text-gold" />
+            </div>
+            <span className="brand-title">ZIVA FINANCE</span>
           </div>
-          <div className="wh-details mono">
-            <div>Project: budget-tracker-507418</div>
-            <div>Dataset: personal_finance</div>
-            <div>Region: africa-south1</div>
+          <button
+            type="button"
+            className="drawer-close-btn"
+            onClick={onClose}
+            ref={closeBtnRef}
+            aria-label="Close navigation"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        <nav className="sidebar-nav">
+          <div className="nav-group-title">COMMAND CENTER</div>
+          {navItems.map((item) => {
+            const Icon = item.icon;
+            const isActive = currentTab === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                className={`nav-item ${isActive ? 'active' : ''} ${item.highlight ? 'nav-item-highlight' : ''}`}
+                onClick={() => {
+                  onSelectTab(item.id);
+                  onClose?.();
+                }}
+                id={`nav-tab-${item.id}`}
+              >
+                <Icon size={18} className="nav-icon" />
+                <span className="nav-label">{item.label}</span>
+                {item.highlight && <span className="nav-badge-new">PRO</span>}
+              </button>
+            );
+          })}
+        </nav>
+
+        {/* Warehouse Anchor Footer */}
+        <div className="sidebar-footer">
+          <div className="warehouse-info-card">
+            <div className="wh-header">
+              <span className="wh-dot pulse-live" />
+              <span className="wh-title">BigQuery Data Warehouse</span>
+            </div>
+            <div className="wh-details mono">
+              <div>Project: budget-tracker-507418</div>
+              <div>Dataset: personal_finance</div>
+              <div>Region: africa-south1</div>
+            </div>
           </div>
         </div>
-      </div>
-    </aside>
+      </aside>
+    </>
   );
 };

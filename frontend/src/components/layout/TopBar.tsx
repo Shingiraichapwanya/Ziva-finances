@@ -1,6 +1,6 @@
 import React from 'react';
 import { MasterCurrency, ExchangeRates } from '../../types/finance';
-import { Camera, RefreshCw, Sparkles, ShieldCheck } from 'lucide-react';
+import { Menu, Camera, RefreshCw, Sparkles, ShieldCheck } from 'lucide-react';
 
 interface TopBarProps {
   masterCurrency: MasterCurrency;
@@ -11,6 +11,8 @@ interface TopBarProps {
   onRefresh?: () => void;
   isRefreshing?: boolean;
   onOpenCopilot: () => void;
+  onToggleNav?: () => void;
+  isNavOpen?: boolean;
 }
 
 export const TopBar: React.FC<TopBarProps> = ({
@@ -21,18 +23,35 @@ export const TopBar: React.FC<TopBarProps> = ({
   onOpenReceiptModal,
   onRefresh,
   isRefreshing,
-  onOpenCopilot
+  onOpenCopilot,
+  onToggleNav,
+  isNavOpen = false
 }) => {
   return (
     <header className="topbar">
-      {/* Brand Identity */}
-      <div className="topbar-brand">
-        <div className="brand-logo-gem">
-          <Sparkles size={18} className="text-gold" />
-        </div>
-        <div>
-          <div className="brand-title">ZIVA FINANCE</div>
-          <div className="brand-subtitle">Financial Command Center</div>
+      {/* Brand Identity & Mobile Menu Toggle */}
+      <div className="topbar-left">
+        {onToggleNav && (
+          <button
+            type="button"
+            className="mobile-nav-toggle"
+            id="mobile-nav-toggle-btn"
+            onClick={onToggleNav}
+            aria-label={isNavOpen ? 'Close navigation menu' : 'Open navigation menu'}
+            aria-expanded={isNavOpen}
+            aria-controls="mobile-sidebar-drawer"
+          >
+            <Menu size={20} />
+          </button>
+        )}
+        <div className="topbar-brand">
+          <div className="brand-logo-gem">
+            <Sparkles size={18} className="text-gold" />
+          </div>
+          <div>
+            <div className="brand-title">ZIVA FINANCE</div>
+            <div className="brand-subtitle">Financial Command Center</div>
+          </div>
         </div>
       </div>
 

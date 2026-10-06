@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Handshake,
   Plus,
@@ -7,19 +7,71 @@ import {
   CheckCircle2,
   Clock,
   Search,
-  Filter,
   RefreshCw,
-  User,
   DollarSign
 } from 'lucide-react';
-import { DebtRecord, DebtBalance, MasterCurrency } from '../../types/finance';
+import { DebtRecord, DebtBalance, MasterCurrency, CurrencyCode, ExchangeRates } from '../../types/finance';
 import { financeApi } from '../../services/api';
+import { convertCurrency, getCurrencySymbol, DEFAULT_RATES } from '../../services/currency';
 
 interface DebtLedgerViewProps {
   masterCurrency: MasterCurrency;
+  rates?: ExchangeRates;
 }
 
-export const DebtLedgerView: React.FC<DebtLedgerViewProps> = ({ masterCurrency }) => {
+function normalizeCurrency(raw: string = 'USD'): CurrencyCode {
+  const upper = (raw || 'USD').trim().toUpperCase();
+  if (upper === 'ZAR') return 'ZAR';
+  if (upper === 'USD') return 'USD';
+  if (upper === 'ZIG' || upper === 'ZWG') return 'ZiG';
+  return 'USD';
+}
+
+function getNativeCurrencySymbol(raw: string = 'USD'): string {
+  const upper = (raw || 'USD').trim().toUpperCase();
+  if (upper === 'ZAR') return 'R';
+  if (upper === 'USD') return '$';
+  if (upper === 'ZIG' || upper === 'ZWG') return 'ZiG';
+  if (upper === 'EUR') return '€';
+  if (upper === 'GBP') return '£';
+  return upper;
+}
+
+function tryConvertAmount(
+  amount: number,
+  fromCurr: CurrencyCode,
+  targetCurr: MasterCurrency,
+  rates: ExchangeRates
+): { amount: number; isAvailable: boolean } {
+  if (fromCurr === targetCurr) {
+    return { amount, isAvailable: true };
+  }
+  if (!rates) {
+    return { amount: 0, isAvailable: false };
+  }
+
+  if (fromCurr === 'ZAR' && targetCurr === 'USD' && (!rates.ZAR_TO_USD || rates.ZAR_TO_USD <= 0)) {
+    return { amount: 0, isAvailable: false };
+  }
+  if (fromCurr === 'USD' && targetCurr === 'ZAR' && (!rates.USD_TO_ZAR || rates.USD_TO_ZAR <= 0)) {
+    return { amount: 0, isAvailable: false };
+  }
+  if ((fromCurr === 'ZiG' || targetCurr === 'ZiG') && (!rates.USD_TO_ZIG_PARALLEL && !rates.USD_TO_ZIG_OFFICIAL)) {
+    return { amount: 0, isAvailable: false };
+  }
+
+  try {
+    const res = convertCurrency(amount, fromCurr, targetCurr, rates);
+    if (isNaN(res.amount) || !isFinite(res.amount)) {
+      return { amount: 0, isAvailable: false };
+    }
+    return { amount: res.amount, isAvailable: true };
+  } catch {
+    return { amount: 0, isAvailable: false };
+  }
+}
+
+export const DebtLedgerView: React.FC<DebtLedgerViewProps> = ({ masterCurrency, rates = DEFAULT_RATES }) => {
   const [debts, setDebts] = useState<DebtRecord[]>([]);
   const [balances, setBalances] = useState<DebtBalance[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -35,6 +87,10 @@ export const DebtLedgerView: React.FC<DebtLedgerViewProps> = ({ masterCurrency }
   const [formCurrency, setFormCurrency] = useState<string>(masterCurrency);
   const [formDate, setFormDate] = useState(new Date().toISOString().split('T')[0]);
   const [formNotes, setFormNotes] = useState('');
+
+  useEffect(() => {
+    setFormCurrency(masterCurrency);
+  }, [masterCurrency]);
 
   const loadData = async () => {
     setIsLoading(true);
@@ -91,10 +147,69 @@ export const DebtLedgerView: React.FC<DebtLedgerViewProps> = ({ masterCurrency }
     }
   };
 
-  // Calculations
-  const totalOwedToMe = balances.reduce((sum, b) => sum + (b.totalOwedToMe || 0), 0);
-  const totalOwedByMe = balances.reduce((sum, b) => sum + (b.totalOwedByMe || 0), 0);
-  const netPosition = totalOwedToMe - totalOwedByMe;
+  const masterSymbol = getCurrencySymbol(masterCurrency);
+
+  // Filter pending debts for active receivables and obligations
+  const pendingDebts = useMemo(() => debts.filter((d) => d.status === 'Pending'), [debts]);
+
+  const {
+    totalOwedToMe,
+    totalOwedByMe,
+    netPosition,
+    computedBalances,
+    ratesUnavailable
+  } = useMemo(() => {
+    let owedToMe = 0;
+    let owedByMe = 0;
+    let missingRate = false;
+    const personMap = new Map<string, { owedToMe: number; owedByMe: number }>();
+
+    for (const d of pendingDebts) {
+      const fromCurr = normalizeCurrency(d.currency);
+      const conv = tryConvertAmount(d.amount, fromCurr, masterCurrency, rates);
+
+      if (!conv.isAvailable) {
+        missingRate = true;
+      }
+
+      const convertedAmount = conv.amount;
+
+      if (!personMap.has(d.personName)) {
+        personMap.set(d.personName, { owedToMe: 0, owedByMe: 0 });
+      }
+      const p = personMap.get(d.personName)!;
+
+      if (d.direction === 'owed_to_me') {
+        owedToMe += convertedAmount;
+        p.owedToMe += convertedAmount;
+      } else {
+        owedByMe += convertedAmount;
+        p.owedByMe += convertedAmount;
+      }
+    }
+
+    const list = Array.from(personMap.entries()).map(([personName, vals]) => {
+      const net = vals.owedToMe - vals.owedByMe;
+      return {
+        personName,
+        totalOwedToMe: vals.owedToMe,
+        totalOwedByMe: vals.owedByMe,
+        netBalance: net,
+        balanceDirection: net > 0 ? ('they_owe_me' as const) : net < 0 ? ('i_owe_them' as const) : ('settled_or_zero' as const)
+      };
+    }).sort((a, b) => Math.abs(b.netBalance) - Math.abs(a.netBalance));
+
+    return {
+      totalOwedToMe: owedToMe,
+      totalOwedByMe: owedByMe,
+      netPosition: owedToMe - owedByMe,
+      computedBalances: list,
+      ratesUnavailable: missingRate
+    };
+  }, [pendingDebts, masterCurrency, rates]);
+
+  // Use multi-currency computed balances if debts are loaded; fallback to BigQuery balances view
+  const displayBalances = computedBalances.length > 0 || debts.length > 0 ? computedBalances : balances;
 
   const filteredDebts = debts.filter((d) => {
     const matchesFilter = filterStatus === 'ALL' || d.status === filterStatus;
@@ -105,9 +220,9 @@ export const DebtLedgerView: React.FC<DebtLedgerViewProps> = ({ masterCurrency }
   });
 
   return (
-    <div className="debt-ledger-view" style={{ padding: '24px', maxWidth: '1400px', margin: '0 auto' }}>
+    <div className="debt-ledger-view">
       {/* Header Bar */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+      <div className="debt-header-row">
         <div>
           <h1 style={{ fontSize: '24px', fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: '10px' }}>
             <Handshake size={28} style={{ color: '#F59E0B' }} />
@@ -117,7 +232,7 @@ export const DebtLedgerView: React.FC<DebtLedgerViewProps> = ({ masterCurrency }
             Peer-to-peer loans, shared expenses, and net balances powered by BigQuery
           </p>
         </div>
-        <div style={{ display: 'flex', gap: '12px' }}>
+        <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
           <button
             type="button"
             onClick={loadData}
@@ -160,17 +275,21 @@ export const DebtLedgerView: React.FC<DebtLedgerViewProps> = ({ masterCurrency }
       </div>
 
       {/* Summary KPI Cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px', marginBottom: '28px' }}>
+      <div className="debt-summary-grid">
         <div style={{ background: '#131822', border: '1px solid rgba(16,185,129,0.2)', borderRadius: '12px', padding: '20px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', color: '#10B981', fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
             <span>People Owe You</span>
             <ArrowDownLeft size={18} />
           </div>
           <div style={{ fontSize: '28px', fontWeight: 800, color: '#F8FAFC', marginTop: '10px' }}>
-            ${totalOwedToMe.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            {ratesUnavailable ? (
+              <span style={{ fontSize: '18px', color: '#EF4444' }}>Rate unavailable</span>
+            ) : (
+              `${masterSymbol} ${totalOwedToMe.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+            )}
           </div>
           <div style={{ color: '#64748B', fontSize: '11px', marginTop: '4px' }}>
-            Incoming pending receivables across {balances.filter(b => b.totalOwedToMe > 0).length} people
+            Incoming pending receivables across {displayBalances.filter(b => b.totalOwedToMe > 0).length} people (in {masterCurrency})
           </div>
         </div>
 
@@ -180,10 +299,14 @@ export const DebtLedgerView: React.FC<DebtLedgerViewProps> = ({ masterCurrency }
             <ArrowUpRight size={18} />
           </div>
           <div style={{ fontSize: '28px', fontWeight: 800, color: '#F8FAFC', marginTop: '10px' }}>
-            ${totalOwedByMe.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            {ratesUnavailable ? (
+              <span style={{ fontSize: '18px', color: '#EF4444' }}>Rate unavailable</span>
+            ) : (
+              `${masterSymbol} ${totalOwedByMe.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+            )}
           </div>
           <div style={{ color: '#64748B', fontSize: '11px', marginTop: '4px' }}>
-            Outgoing obligations across {balances.filter(b => b.totalOwedByMe > 0).length} people
+            Outgoing obligations across {displayBalances.filter(b => b.totalOwedByMe > 0).length} people (in {masterCurrency})
           </div>
         </div>
 
@@ -193,7 +316,11 @@ export const DebtLedgerView: React.FC<DebtLedgerViewProps> = ({ masterCurrency }
             <DollarSign size={18} />
           </div>
           <div style={{ fontSize: '28px', fontWeight: 800, color: netPosition >= 0 ? '#10B981' : '#EF4444', marginTop: '10px' }}>
-            {netPosition >= 0 ? '+' : ''}${netPosition.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            {ratesUnavailable ? (
+              <span style={{ fontSize: '18px', color: '#EF4444' }}>Rate unavailable</span>
+            ) : (
+              `${netPosition >= 0 ? '+' : '-'}${masterSymbol} ${Math.abs(netPosition).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+            )}
           </div>
           <div style={{ color: '#64748B', fontSize: '11px', marginTop: '4px' }}>
             {netPosition > 0 ? 'You are owed money overall' : netPosition < 0 ? 'You owe money overall' : 'All accounts settled'}
@@ -206,13 +333,13 @@ export const DebtLedgerView: React.FC<DebtLedgerViewProps> = ({ masterCurrency }
         <h2 style={{ fontSize: '16px', fontWeight: 600, color: '#E2E8F0', marginBottom: '16px' }}>
           Individual Balances (debt_credit_balances View)
         </h2>
-        {balances.length === 0 ? (
+        {displayBalances.length === 0 ? (
           <div style={{ background: '#131822', padding: '24px', borderRadius: '12px', textAlign: 'center', color: '#64748B', border: '1px solid rgba(255,255,255,0.06)' }}>
             No outstanding pending balances. All debts are settled!
           </div>
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '14px' }}>
-            {balances.map((b) => {
+          <div className="debt-balances-grid">
+            {displayBalances.map((b) => {
               const isPositive = b.netBalance > 0;
               const isNegative = b.netBalance < 0;
               return (
@@ -260,7 +387,11 @@ export const DebtLedgerView: React.FC<DebtLedgerViewProps> = ({ masterCurrency }
                           color: isPositive ? '#10B981' : isNegative ? '#EF4444' : '#94A3B8'
                         }}
                       >
-                        {isPositive ? '+' : ''}${Math.abs(b.netBalance).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        {ratesUnavailable ? (
+                          'Rate unavailable'
+                        ) : (
+                          `${isPositive ? '+' : isNegative ? '-' : ''}${masterSymbol} ${Math.abs(b.netBalance).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                        )}
                       </div>
                       <span
                         style={{
@@ -330,8 +461,8 @@ export const DebtLedgerView: React.FC<DebtLedgerViewProps> = ({ masterCurrency }
         </div>
 
         {/* Table */}
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
+        <div className="table-responsive debt-table-wrapper">
+          <table className="debt-table" style={{ width: '100%', minWidth: '600px', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
             <thead>
               <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: '#64748B', fontSize: '11px', textTransform: 'uppercase' }}>
                 <th style={{ padding: '10px 12px' }}>Date</th>
@@ -371,7 +502,27 @@ export const DebtLedgerView: React.FC<DebtLedgerViewProps> = ({ masterCurrency }
                     </td>
                     <td style={{ padding: '12px', color: '#94A3B8' }}>{d.notes || '—'}</td>
                     <td style={{ padding: '12px', textAlign: 'right', fontWeight: 700 }}>
-                      ${d.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {d.currency}
+                      {(() => {
+                        const sym = getNativeCurrencySymbol(d.currency);
+                        const code = (d.currency || 'USD').trim().toUpperCase();
+                        const formattedAmount = Math.abs(d.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                        const fromCurr = normalizeCurrency(d.currency);
+                        const isDiff = fromCurr !== masterCurrency;
+                        const conv = isDiff ? tryConvertAmount(d.amount, fromCurr, masterCurrency, rates) : null;
+
+                        return (
+                          <div>
+                            <div>
+                              {sym} {formattedAmount} <span style={{ fontSize: '11px', color: '#94A3B8', fontWeight: 500 }}>{code}</span>
+                            </div>
+                            {isDiff && conv && conv.isAvailable && (
+                              <div style={{ fontSize: '11px', color: '#64748B', fontWeight: 400, marginTop: '2px' }}>
+                                ≈ {masterSymbol} {Math.abs(conv.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </td>
                     <td style={{ padding: '12px', textAlign: 'center' }}>
                       <span
@@ -557,6 +708,7 @@ export const DebtLedgerView: React.FC<DebtLedgerViewProps> = ({ masterCurrency }
                   >
                     <option value="USD">USD</option>
                     <option value="ZAR">ZAR</option>
+                    <option value="ZiG">ZiG</option>
                     <option value="EUR">EUR</option>
                     <option value="GBP">GBP</option>
                   </select>

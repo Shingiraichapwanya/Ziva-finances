@@ -19,6 +19,16 @@
   gap: 20px;
 }
 
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.mobile-nav-toggle {
+  display: none;
+}
+
 .topbar-brand {
   display: flex;
   align-items: center;
@@ -165,6 +175,8 @@
 /* Sidebar */
 .sidebar {
   width: var(--sidebar-width);
+  min-width: var(--sidebar-width);
+  flex-shrink: 0;
   background: var(--bg-surface);
   border-right: 1px solid var(--border-card);
   display: flex;
@@ -174,6 +186,33 @@
   position: sticky;
   top: 0;
   height: 100vh;
+}
+
+.mobile-drawer-header {
+  display: none;
+}
+
+.drawer-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.drawer-close-btn {
+  display: none;
+}
+
+.sidebar-backdrop {
+  display: none;
+}
+
+@media (min-width: 1025px) {
+  .sidebar-backdrop,
+  .mobile-drawer-header,
+  .drawer-close-btn,
+  .mobile-nav-toggle {
+    display: none !important;
+  }
 }
 
 .nav-group-title {
@@ -660,9 +699,18 @@
   display: flex;
   gap: 8px;
   margin-bottom: 20px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  padding-bottom: 4px;
+}
+
+.filter-pill-bar::-webkit-scrollbar {
+  display: none;
 }
 
 .filter-pill {
+  flex-shrink: 0;
   padding: 8px 16px;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid var(--border-subtle);
@@ -840,10 +888,13 @@
 
 .ledger-table-wrapper {
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  width: 100%;
 }
 
 .ledger-table {
   width: 100%;
+  min-width: 620px;
   border-collapse: collapse;
   text-align: left;
 }
@@ -2723,8 +2774,15 @@
   color: var(--gold-300);
 }
 
+.table-responsive {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
 .statement-table {
   width: 100%;
+  min-width: 640px;
   border-collapse: collapse;
   font-size: 12.5px;
 }
@@ -2924,6 +2982,353 @@
   color: var(--text-secondary);
   border-top: 1px solid rgba(255, 255, 255, 0.05);
   padding-top: 8px;
+}
+
+/* ==========================================================================
+   Debt & Credit Ledger Responsive Component Styles
+   ========================================================================== */
+
+.debt-ledger-view {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.debt-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+.debt-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+  margin-bottom: 28px;
+}
+
+.debt-balances-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 14px;
+}
+
+.debt-table-wrapper {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  width: 100%;
+  border-radius: var(--radius-md);
+}
+
+.debt-table {
+  width: 100%;
+  min-width: 620px;
+  border-collapse: collapse;
+}
+
+/* ==========================================================================
+   Responsive Breakpoints & Mobile Adaptations (Tablets, iPhones & PWAs)
+   ========================================================================== */
+
+@media (max-width: 1024px) {
+  /* Remove ALL sidebar space reserved by the main layout on mobile */
+  .app-container {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100vw !important;
+    min-width: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow-x: hidden !important;
+  }
+
+  .main-content {
+    display: flex !important;
+    flex-direction: column !important;
+    width: 100% !important;
+    max-width: 100vw !important;
+    min-width: 0 !important;
+    margin: 0 !important;
+    margin-left: 0 !important;
+    padding: 0 !important;
+    flex: none !important;
+    overflow-x: hidden !important;
+  }
+
+  /* Mobile Sidebar Drawer Overlay: closed by default, off-screen, non-interactive */
+  .sidebar {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    bottom: 0 !important;
+    height: 100vh !important;
+    height: 100dvh !important;
+    width: min(300px, 82vw) !important;
+    max-width: 82vw !important;
+    min-width: 0 !important;
+    margin: 0 !important;
+    z-index: 1000 !important;
+    transform: translateX(-100%) !important;
+    visibility: hidden;
+    pointer-events: none;
+    transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), visibility 0.28s;
+    box-shadow: none !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    padding: max(16px, var(--safe-top)) 16px max(24px, var(--safe-bottom)) 16px !important;
+    background: #0b0f19 !important;
+    border-right: 1px solid rgba(255, 255, 255, 0.12) !important;
+  }
+
+  .sidebar.mobile-open {
+    transform: translateX(0) !important;
+    visibility: visible !important;
+    pointer-events: auto !important;
+    box-shadow: 14px 0 40px rgba(0, 0, 0, 0.85) !important;
+  }
+
+  .sidebar-backdrop {
+    display: block;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    z-index: 999;
+    animation: fadeInBackdrop 0.2s ease-out;
+  }
+
+  @keyframes fadeInBackdrop {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  .mobile-drawer-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 16px;
+    margin-bottom: 16px;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .drawer-close-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius-md);
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .drawer-close-btn:hover,
+  .drawer-close-btn:focus-visible {
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.12);
+    border-color: rgba(255, 255, 255, 0.25);
+    outline: none;
+  }
+
+  /* Accessible Hamburger Menu Button */
+  .mobile-nav-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px;
+    height: 38px;
+    border-radius: var(--radius-md);
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+  }
+
+  .mobile-nav-toggle:hover,
+  .mobile-nav-toggle:focus-visible {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: var(--gold-400);
+    outline: none;
+  }
+
+  /* TopBar Layout */
+  .topbar {
+    padding: max(10px, var(--safe-top)) 16px 10px 16px;
+    height: auto;
+    min-height: calc(58px + var(--safe-top));
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .topbar-brand .brand-subtitle {
+    display: none;
+  }
+
+  .toggle-caption {
+    display: none;
+  }
+
+  .fx-ticker-bar {
+    order: 3;
+    width: 100%;
+    overflow-x: auto;
+    white-space: nowrap;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 2px;
+    scrollbar-width: none;
+  }
+
+  .fx-ticker-bar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .fx-pill {
+    flex-shrink: 0;
+  }
+
+  .topbar-actions {
+    gap: 8px;
+    margin-left: auto;
+  }
+
+  /* Dashboard Hero & Card Stacking */
+  .hero-net-worth {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 20px;
+    padding: 20px;
+  }
+
+  .tier-breakdown-grid {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 10px;
+    width: 100%;
+  }
+
+  .tier-col {
+    flex: 1 1 calc(33.333% - 10px);
+    min-width: 140px;
+  }
+
+  .wealth-tiles-row {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .envelope-mini-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .tier-summary-row {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .budget-macro-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .burn-hero-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .hero-amount {
+    font-size: 32px;
+  }
+
+  .hero-subcurrencies {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .tier-breakdown-grid {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .tier-col {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .wealth-tiles-row,
+  .envelope-mini-grid,
+  .tier-summary-row,
+  .budget-macro-grid,
+  .burn-hero-grid,
+  .env-figures-grid,
+  .sliders-grid,
+  .debt-summary-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .accounts-grid,
+  .envelopes-grid,
+  .signals-grid,
+  .holdings-grid,
+  .settings-grid,
+  .debt-balances-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .analytics-grid-two-column {
+    grid-template-columns: 1fr;
+  }
+
+  .debt-ledger-view {
+    padding: 0 !important;
+  }
+
+  .debt-header-row {
+    flex-direction: column;
+    align-items: flex-start !important;
+    gap: 12px;
+  }
+}
+
+@media (max-width: 480px) {
+  .topbar {
+    padding: max(8px, var(--safe-top)) 12px 8px 12px;
+  }
+
+  .brand-title {
+    font-size: 14px;
+  }
+
+  .brand-logo-gem {
+    width: 32px;
+    height: 32px;
+  }
+
+  .btn-copilot-toggle span,
+  .btn-scan span {
+    display: none;
+  }
+
+  .btn-copilot-toggle,
+  .btn-scan {
+    padding: 7px 10px;
+  }
+
+  .currency-toggle-btn {
+    padding: 4px 7px;
+    font-size: 11px;
+  }
+
+  .sync-status-badge {
+    padding: 4px 8px;
+    font-size: 10px;
+  }
 }
 
 

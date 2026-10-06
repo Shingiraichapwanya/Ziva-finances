@@ -53,6 +53,9 @@ export function App() {
   const [isOnline, setIsOnline] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
+  // Mobile Navigation Drawer State
+  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
+
   // Live BigQuery Hydration
   const fetchLiveData = async () => {
     setIsRefreshing(true);
@@ -176,7 +179,12 @@ export function App() {
   return (
     <div className="app-container">
       {/* Sidebar Navigation */}
-      <Sidebar currentTab={currentTab} onSelectTab={setCurrentTab} />
+      <Sidebar
+        currentTab={currentTab}
+        onSelectTab={setCurrentTab}
+        isOpen={isMobileNavOpen}
+        onClose={() => setIsMobileNavOpen(false)}
+      />
 
       {/* Main Content Area */}
       <div className="main-content">
@@ -189,6 +197,8 @@ export function App() {
           onRefresh={fetchLiveData}
           isRefreshing={isRefreshing}
           onOpenCopilot={() => setIsCopilotOpen(true)}
+          onToggleNav={() => setIsMobileNavOpen((prev) => !prev)}
+          isNavOpen={isMobileNavOpen}
         />
 
         <main className="page-body">
@@ -226,6 +236,7 @@ export function App() {
           {currentTab === 'debts' && (
             <DebtLedgerView
               masterCurrency={masterCurrency}
+              rates={rates}
             />
           )}
 
