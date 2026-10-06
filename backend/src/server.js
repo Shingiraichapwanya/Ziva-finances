@@ -430,8 +430,18 @@ app.listen(PORT, async () => {
 
   // Explicit startup connectivity test
   console.log('[Startup Check] Verifying BigQuery warehouse connectivity...');
-  await verifyBigQueryConnectivity({ forceCheck: true });
+  const connState = await verifyBigQueryConnectivity({ forceCheck: true });
   await verifyBigQuery();
+
+  // Auto-configure BigQuery external tables to match active spreadsheet ID
+  if (connState.connected && SHEETS_CONFIG.spreadsheetId) {
+    try {
+      console.log(`[Startup Check] Auto-configuring external tables for spreadsheet: ${SHEETS_CONFIG.spreadsheetId}...`);
+      await ensureExternalTablesConfigured(SHEETS_CONFIG.spreadsheetId);
+    } catch (tblErr) {
+      console.warn('[Startup Check] Note: Could not auto-configure external tables on boot:', tblErr.message);
+    }
+  }
 });
 
 module.exports = app;

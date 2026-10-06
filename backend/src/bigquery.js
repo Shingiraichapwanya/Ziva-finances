@@ -1142,20 +1142,20 @@ export async function ensureExternalTablesConfigured(spreadsheetId = SHEETS_CONF
       cash_flow_tier              STRING NOT NULL OPTIONS(description="Cash flow designation"),
       category_id                 STRING NOT NULL OPTIONS(description="Foreign key to dim_categories"),
       transaction_type            STRING NOT NULL OPTIONS(description="Transaction type"),
-      original_amount             NUMERIC(18, 4) NOT NULL OPTIONS(description="Amount in account currency"),
+      original_amount             NUMERIC NOT NULL OPTIONS(description="Amount in account currency"),
       original_currency           STRING NOT NULL OPTIONS(description="Currency code"),
-      reporting_amount_usd        NUMERIC(18, 4) NOT NULL OPTIONS(description="Normalized USD amount"),
-      reporting_amount_zar        NUMERIC(18, 4) NOT NULL OPTIONS(description="Normalized ZAR amount"),
-      applied_exchange_rate_usd   NUMERIC(18, 6) NOT NULL OPTIONS(description="USD conversion rate"),
-      applied_exchange_rate_zar   NUMERIC(18, 6) NOT NULL OPTIONS(description="ZAR conversion rate"),
+      reporting_amount_usd        NUMERIC NOT NULL OPTIONS(description="Normalized USD amount"),
+      reporting_amount_zar        NUMERIC NOT NULL OPTIONS(description="Normalized ZAR amount"),
+      applied_exchange_rate_usd   NUMERIC NOT NULL OPTIONS(description="USD conversion rate"),
+      applied_exchange_rate_zar   NUMERIC NOT NULL OPTIONS(description="ZAR conversion rate"),
       rate_type_applied           STRING NOT NULL OPTIONS(description="Conversion rate regime"),
       transfer_counterpart_id     STRING OPTIONS(description="Transfer counterpart ID"),
       merchant_or_payee           STRING NOT NULL OPTIONS(description="Merchant or payee name"),
       payment_method              STRING NOT NULL OPTIONS(description="Payment channel"),
-      statutory_levy_or_fee       NUMERIC(18, 4) OPTIONS(description="Levy or statutory tax"),
+      statutory_levy_or_fee       NUMERIC OPTIONS(description="Levy or statutory tax"),
       is_tax_deductible           BOOL NOT NULL OPTIONS(description="Tax deduction eligibility"),
-      tax_deductible_amount_zar   NUMERIC(18, 4) OPTIONS(description="Tax deductible portion in ZAR"),
-      tax_deductible_amount_usd   NUMERIC(18, 4) OPTIONS(description="Tax deductible portion in USD"),
+      tax_deductible_amount_zar   NUMERIC OPTIONS(description="Tax deductible portion in ZAR"),
+      tax_deductible_amount_usd   NUMERIC OPTIONS(description="Tax deductible portion in USD"),
       tax_invoice_number          STRING OPTIONS(description="Tax invoice reference number"),
       notes                       STRING OPTIONS(description="Personal notes or narrative"),
       tags                        STRING OPTIONS(description="Tags list or comma-separated string"),
@@ -1175,7 +1175,7 @@ export async function ensureExternalTablesConfigured(spreadsheetId = SHEETS_CONF
       id                          STRING NOT NULL OPTIONS(description="Debt record ID"),
       person_name                 STRING NOT NULL OPTIONS(description="Counterparty name"),
       direction                   STRING NOT NULL OPTIONS(description="owed_by_me or owed_to_me"),
-      amount                      NUMERIC(18, 4) NOT NULL OPTIONS(description="Principal amount"),
+      amount                      NUMERIC NOT NULL OPTIONS(description="Principal amount"),
       currency                    STRING NOT NULL OPTIONS(description="Currency code"),
       date                        DATE NOT NULL OPTIONS(description="Entry date"),
       status                      STRING NOT NULL OPTIONS(description="Pending or Settled"),
@@ -1193,7 +1193,9 @@ export async function ensureExternalTablesConfigured(spreadsheetId = SHEETS_CONF
   `;
 
   console.log(`[BigQuery] Applying external table configuration for Google Sheet: ${spreadsheetId}...`);
+  await runQuery(`DROP TABLE IF EXISTS \`${BQ_CONFIG.projectId}.${BQ_CONFIG.datasetId}.fct_transactions\``);
   await runQuery(fctTransactionsDdl);
+  await runQuery(`DROP TABLE IF EXISTS \`${BQ_CONFIG.projectId}.${BQ_CONFIG.datasetId}.debt_credit_ledger\``);
   await runQuery(debtLedgerDdl);
   console.log('[BigQuery] Successfully configured fct_transactions and debt_credit_ledger external tables.');
 
