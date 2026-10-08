@@ -22,9 +22,14 @@ import {
 } from 'lucide-react';
 import { NavTab } from '../layout/Sidebar';
 import { CopilotBriefingCard } from '../copilot/CopilotBriefingCard';
+import { LiveAccountsState, describeTierInstitutions, hasDisplayableBalances } from '../../services/liveData';
+import { LiveAccountsNotice } from '../accounts/LiveAccountsNotice';
 
 interface DashboardViewProps {
   accounts: Account[];
+  /** True when the top bar shows "BigQuery Live". */
+  isLive?: boolean;
+  liveAccounts?: LiveAccountsState;
   envelopes: BudgetEnvelope[];
   transactions: Transaction[];
   masterCurrency: MasterCurrency;
@@ -37,6 +42,8 @@ interface DashboardViewProps {
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
   accounts,
+  isLive = false,
+  liveAccounts,
   envelopes,
   transactions,
   masterCurrency,
@@ -65,6 +72,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const netWorthUsd = convertCurrency(totalNetWorthMaster, masterCurrency, 'USD', rates);
   const netWorthZig = convertCurrency(totalNetWorthMaster, masterCurrency, 'ZiG', rates);
 
+  // Never render a fabricated zero when live balances could not be loaded
+  const showBalances = !liveAccounts || hasDisplayableBalances(isLive, liveAccounts);
+  const fmt = (amount: number) =>
+    showBalances ? convertCurrency(amount, masterCurrency, masterCurrency, rates).formatted : '—';
+
   // 2. Budget Health Aggregates
   const totalPlannedZar = envelopes.reduce((sum, e) => sum + e.plannedAmountZar, 0);
   const totalSpentZar = envelopes.reduce((sum, e) => sum + e.actualSpentZar, 0);
@@ -75,6 +87,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   return (
     <div className="dashboard-view animate-fade-in">
+      {isLive && liveAccounts && <LiveAccountsNotice live={liveAccounts} />}
+
       {/* 1. Net Worth Hero Banner */}
       <section className="glass-panel hero-net-worth">
         <div className="hero-content">
@@ -83,12 +97,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <span className="hero-time">Real-Time BigQuery Partition Valuation</span>
           </div>
           <h1 className="hero-amount mono">
-            {convertCurrency(totalNetWorthMaster, masterCurrency, masterCurrency, rates).formatted}
+            {fmt(totalNetWorthMaster)}
           </h1>
           <div className="hero-subcurrencies mono">
-            <span className="sub-cur-pill">{netWorthZar.formatted} ZAR</span>
-            <span className="sub-cur-pill">{netWorthUsd.formatted} USD</span>
-            <span className="sub-cur-pill">{netWorthZig.formatted} ZiG</span>
+            <span className="sub-cur-pill">{showBalances ? netWorthZar.formatted : '—'} ZAR</span>
+            <span className="sub-cur-pill">{showBalances ? netWorthUsd.formatted : '—'} USD</span>
+            <span className="sub-cur-pill">{showBalances ? netWorthZig.formatted : '—'} ZiG</span>
           </div>
         </div>
 
@@ -97,23 +111,23 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div className="tier-col" onClick={() => onNavigate('accounts')}>
             <div className="tier-tag">TIER 1: DAILY SPEND</div>
             <div className="tier-val mono">
-              {convertCurrency(tier1TotalMaster, masterCurrency, masterCurrency, rates).formatted}
+              {fmt(tier1TotalMaster)}
             </div>
-            <div className="tier-desc">Capitec Cheque & EcoCash Wallets</div>
+            <div className="tier-desc">{describeTierInstitutions(accounts, 'DAILY_SPENDING')}</div>
           </div>
           <div className="tier-col" onClick={() => onNavigate('accounts')}>
             <div className="tier-tag">TIER 2: MONTHLY ALLOC</div>
             <div className="tier-val mono">
-              {convertCurrency(tier2TotalMaster, masterCurrency, masterCurrency, rates).formatted}
+              {fmt(tier2TotalMaster)}
             </div>
-            <div className="tier-desc">Fixed Rent, Internet, & Bills</div>
+            <div className="tier-desc">{describeTierInstitutions(accounts, 'MONTHLY_ALLOCATION')}</div>
           </div>
           <div className="tier-col tier-col-vault" onClick={() => onNavigate('accounts')}>
             <div className="tier-tag">TIER 3: LONG-TERM VAULT</div>
             <div className="tier-val mono text-gold">
-              {convertCurrency(tier3TotalMaster, masterCurrency, masterCurrency, rates).formatted}
+              {fmt(tier3TotalMaster)}
             </div>
-            <div className="tier-desc">32-Day Notice & EasyEquities ETFs</div>
+            <div className="tier-desc">{describeTierInstitutions(accounts, 'LONG_TERM_VAULT')}</div>
           </div>
         </div>
       </section>

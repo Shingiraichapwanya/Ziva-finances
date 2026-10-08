@@ -3,9 +3,9 @@ const path = require('path');
 const os = require('os');
 
 /**
- * Startup function: Ensure BigQuery credentials provided as a JSON string
- * in GOOGLE_APPLICATION_CREDENTIALS are written to a temporary physical file
- * before any Google Cloud SDK client initializes.
+ * Startup function: Ensure Google credentials provided as a JSON string
+ * in GOOGLE_APPLICATION_CREDENTIALS or GOOGLE_CREDENTIALS are written to a temporary physical file
+ * before any Google SDK client initializes.
  */
 function setupGoogleCredentials() {
   const rawCreds = process.env.GOOGLE_APPLICATION_CREDENTIALS || process.env.GOOGLE_CREDENTIALS;
@@ -17,10 +17,7 @@ function setupGoogleCredentials() {
   // Check if credentials are provided as a JSON string rather than a file path
   if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
     try {
-      // Validate JSON formatting
       JSON.parse(trimmed);
-
-      // Resolve temporary file path (/tmp on Linux/Render or os.tmpdir() fallback)
       const tempDir = fs.existsSync('/tmp') ? '/tmp' : os.tmpdir();
       const tempFilePath = path.join(tempDir, 'google-creds.json');
 
@@ -39,22 +36,12 @@ setupGoogleCredentials();
 const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
-const { BigQuery } = require('@google-cloud/bigquery');
 
-// Finance and metrics imports
+// Google Sheets Live Data Repository (Zero BigQuery billing dependency)
+const sheetsRepo = require('../services/googleSheetsRepository');
 const {
-  getTaxSchedule,
-  getDailyBurnMetrics,
-  getMonthlyBurnMetrics,
-  getRunwayProjection,
-  getRevenueMetrics,
-} = require('../services/financeService');
-
-// BigQuery helper & database service imports
-const {
-  BQ_CONFIG,
+  REPO_CONFIG,
   SHEETS_CONFIG,
-  runQuery,
   getExchangeRates,
   getAccounts,
   getTransactions,
@@ -64,55 +51,24 @@ const {
   getDebtBalances,
   insertDebt,
   settleDebt,
+  reopenDebt,
   deleteDebt,
   getBudgetEnvelopes,
+  getTaxSchedule,
   getVaultHoldings,
+  getDailyBurnMetrics,
   getIncomeStatements,
   getNonOperatingGains,
   getPerformanceSummary,
-  verifyBigQueryConnectivity,
-  ensureExternalTablesConfigured,
+  verifySheetsConnectivity,
   getTroubleshootingGuidance,
-} = require('./bigquery');
+} = sheetsRepo;
 
 // AI Copilot service imports
 const {
   getCopilotInsights,
   chatWithCopilot,
 } = require('./copilot');
-
-// BigQuery client initialization
-let bigquery;
-try {
-  if (process.env.GOOGLE_APPLICATION_CREDENTIALS && fs.existsSync(process.env.GOOGLE_APPLICATION_CREDENTIALS)) {
-    bigquery = new BigQuery({
-      keyFilename: process.env.GOOGLE_APPLICATION_CREDENTIALS,
-    });
-  } else if (process.env.GOOGLE_CREDENTIALS) {
-    const creds = JSON.parse(process.env.GOOGLE_CREDENTIALS);
-    bigquery = new BigQuery({
-      projectId: creds.project_id,
-      credentials: {
-        client_email: creds.client_email,
-        private_key: creds.private_key,
-      },
-    });
-  } else {
-    bigquery = new BigQuery();
-  }
-} catch (err) {
-  console.warn('[Startup] BigQuery initialization fallback:', err.message);
-  bigquery = new BigQuery();
-}
-
-async function verifyBigQuery() {
-  try {
-    const [datasets] = await bigquery.getDatasets();
-    console.log('BigQuery connected. Dataset count:', datasets.length);
-  } catch (err) {
-    console.error('Error verifying BigQuery:', err);
-  }
-}
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -121,16 +77,17 @@ app.use(cors());
 app.use(bodyParser.json());
 app.use(express.json());
 
-// Health & Status endpoint with rich BigQuery connectivity diagnostics
+// Health & Status endpoint with Google Sheets connectivity diagnostics
 app.get('/api/health', async (req, res) => {
   try {
     const forceCheck = req.query.force === 'true';
-    const state = await verifyBigQueryConnectivity({ forceCheck });
+    const state = await verifySheetsConnectivity({ forceCheck });
     res.json(state);
   } catch (error) {
     res.status(500).json({
       status: 'OFFLINE',
       connected: false,
+      liveDataLayer: 'GOOGLE_SHEETS_API',
       error: {
         message: error.message,
         troubleshooting: getTroubleshootingGuidance(error)
@@ -139,10 +96,10 @@ app.get('/api/health', async (req, res) => {
   }
 });
 
-// Explicit connection test route - forces live probe to BigQuery
+// Explicit connection test route - forces live probe to Google Sheets
 app.all('/api/connection-test', async (req, res) => {
   try {
-    const state = await verifyBigQueryConnectivity({ forceCheck: true });
+    const state = await verifySheetsConnectivity({ forceCheck: true });
     if (state.connected) {
       res.json(state);
     } else {
@@ -152,6 +109,7 @@ app.all('/api/connection-test', async (req, res) => {
     res.status(503).json({
       status: 'OFFLINE',
       connected: false,
+      liveDataLayer: 'GOOGLE_SHEETS_API',
       error: {
         message: error.message,
         troubleshooting: getTroubleshootingGuidance(error)
@@ -160,26 +118,25 @@ app.all('/api/connection-test', async (req, res) => {
   }
 });
 
-// Live BigQuery test query execution endpoint
+// Live data test read endpoint (replaced BigQuery test-query with Sheets read)
 app.get('/api/test-query', async (req, res) => {
   try {
-    const sql = `SELECT 
-      CURRENT_TIMESTAMP() as query_time,
-      COUNT(1) as total_transactions,
-      ROUND(SUM(reporting_amount_zar), 2) as total_volume_zar
-    FROM \`${BQ_CONFIG.projectId}.${BQ_CONFIG.datasetId}.fct_transactions\``;
-    const rows = await runQuery(sql);
+    const txs = await getTransactions(50);
+    const totalVolumeZar = txs.reduce((sum, t) => sum + (Number(t.reportingAmountZar) || 0), 0);
     res.json({
       status: 'SUCCESS',
-      project: BQ_CONFIG.projectId,
-      dataset: BQ_CONFIG.datasetId,
-      location: BQ_CONFIG.location,
-      result: rows[0] || rows,
-      rowCount: rows.length,
+      source: 'GOOGLE_SHEETS_LIVE',
+      spreadsheetId: REPO_CONFIG.spreadsheetId,
+      result: {
+        query_time: new Date().toISOString(),
+        total_transactions: txs.length,
+        total_volume_zar: parseFloat(totalVolumeZar.toFixed(2))
+      },
+      rowCount: txs.length,
       timestamp: new Date().toISOString()
     });
   } catch (error) {
-    console.error('Error running BigQuery test query:', error);
+    console.error('Error running test read from Google Sheets:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -229,7 +186,7 @@ app.post('/api/transactions', async (req, res) => {
   }
 });
 
-// Delete transaction (Hard delete from BigQuery warehouse)
+// Delete transaction
 app.delete('/api/transactions/:id', async (req, res) => {
   try {
     const { id } = req.params;
@@ -274,6 +231,7 @@ app.post('/api/debts', async (req, res) => {
   }
 });
 
+// Settle Debt - updates status in Google Sheets debt_credit_ledger directly
 app.patch('/api/debts/:id/settle', async (req, res) => {
   try {
     const { id } = req.params;
@@ -285,6 +243,30 @@ app.patch('/api/debts/:id/settle', async (req, res) => {
   }
 });
 
+// Reopen / Undo Settle Debt
+app.patch('/api/debts/:id/reopen', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await reopenDebt(id);
+    res.json(result);
+  } catch (error) {
+    console.error(`Error reopening debt ${req.params.id}:`, error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/debts/:id/reopen', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await reopenDebt(id);
+    res.json(result);
+  } catch (error) {
+    console.error(`Error reopening debt ${req.params.id}:`, error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Delete Debt
 app.delete('/api/debts/:id', async (req, res) => {
   try {
     const { id } = req.params;
@@ -296,28 +278,28 @@ app.delete('/api/debts/:id', async (req, res) => {
   }
 });
 
-// Google Sheets Ingestion & External Table Configuration endpoints
+// Google Sheets Ingestion & Architecture endpoints
 app.get('/api/sheets/config', (req, res) => {
   res.json({
-    spreadsheetId: SHEETS_CONFIG.spreadsheetId,
-    transactionsTab: SHEETS_CONFIG.transactionsTab,
-    debtsTab: SHEETS_CONFIG.debtsTab,
-    rangeTransactions: SHEETS_CONFIG.rangeTransactions,
-    rangeDebts: SHEETS_CONFIG.rangeDebts,
-    ingestionMode: 'GOOGLE_SHEETS_API',
-    readMode: 'BIGQUERY_EXTERNAL_TABLE'
+    spreadsheetId: REPO_CONFIG.spreadsheetId,
+    transactionsTab: REPO_CONFIG.transactionsTab,
+    debtsTab: REPO_CONFIG.debtsTab,
+    accountsTab: REPO_CONFIG.accountsTab,
+    categoriesTab: REPO_CONFIG.categoriesTab,
+    budgetsTab: REPO_CONFIG.budgetsTab,
+    ratesTab: REPO_CONFIG.ratesTab,
+    readMode: 'GOOGLE_SHEETS_API',
+    writeMode: 'GOOGLE_SHEETS_API',
+    bigqueryBillingRequired: false
   });
 });
 
 app.post('/api/sheets/configure-external-tables', async (req, res) => {
-  try {
-    const spreadsheetId = req.body.spreadsheetId || SHEETS_CONFIG.spreadsheetId;
-    const result = await ensureExternalTablesConfigured(spreadsheetId);
-    res.json(result);
-  } catch (error) {
-    console.error('Error configuring external tables:', error);
-    res.status(500).json({ error: error.message });
-  }
+  res.json({
+    success: true,
+    spreadsheetId: REPO_CONFIG.spreadsheetId,
+    message: 'Google Sheets is the authoritative live data layer. BigQuery external tables bypassed.'
+  });
 });
 
 // Budget Envelopes vs Actual
@@ -421,27 +403,27 @@ app.get('/api/analytics/summary', async (req, res) => {
   }
 });
 
-app.listen(PORT, async () => {
-  console.log(`=======================================================`);
-  console.log(` Ziva Finance BigQuery API Server running on port ${PORT}`);
-  console.log(` Connected to GCP Project: ${BQ_CONFIG.projectId}`);
-  console.log(` Dataset: ${BQ_CONFIG.datasetId} (${BQ_CONFIG.location})`);
-  console.log(`=======================================================`);
+if (require.main === module) {
+  app.listen(PORT, async () => {
+    console.log(`=======================================================`);
+    console.log(` Ziva Finance Google Sheets API Server running on port ${PORT}`);
+    console.log(` Spreadsheet ID: ${REPO_CONFIG.spreadsheetId}`);
+    console.log(` Live Architecture: Google Sheets API v4 (Zero BigQuery billing)`);
+    console.log(`=======================================================`);
 
-  // Explicit startup connectivity test
-  console.log('[Startup Check] Verifying BigQuery warehouse connectivity...');
-  const connState = await verifyBigQueryConnectivity({ forceCheck: true });
-  await verifyBigQuery();
-
-  // Auto-configure BigQuery external tables to match active spreadsheet ID
-  if (connState.connected && SHEETS_CONFIG.spreadsheetId) {
+    // Verify Google Sheets connectivity on boot
     try {
-      console.log(`[Startup Check] Auto-configuring external tables for spreadsheet: ${SHEETS_CONFIG.spreadsheetId}...`);
-      await ensureExternalTablesConfigured(SHEETS_CONFIG.spreadsheetId);
-    } catch (tblErr) {
-      console.warn('[Startup Check] Note: Could not auto-configure external tables on boot:', tblErr.message);
+      console.log('[Startup Check] Verifying Google Sheets connectivity...');
+      const connState = await verifySheetsConnectivity({ forceCheck: true });
+      if (connState.connected) {
+        console.log(`[Startup Check] Google Sheets connected successfully (Spreadsheet: ${connState.spreadsheetId})`);
+      } else {
+        console.warn(`[Startup Check] Google Sheets connectivity warning: ${connState.error?.message || 'Check credentials'}`);
+      }
+    } catch (err) {
+      console.warn('[Startup Check] Note on Google Sheets check:', err.message);
     }
-  }
-});
+  });
+}
 
 module.exports = app;

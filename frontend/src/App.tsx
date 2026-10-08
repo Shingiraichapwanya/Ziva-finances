@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import './App.css';
 import { MasterCurrency, Transaction } from './types/finance';
 import { TopBar } from './components/layout/TopBar';
@@ -27,6 +27,12 @@ import {
 } from './services/mockData';
 import { DEFAULT_RATES } from './services/currency';
 import { financeApi } from './services/api';
+import {
+  INITIAL_LIVE_ACCOUNTS_STATE,
+  LiveAccountsState,
+  resolveLiveAccounts,
+  selectDisplayedAccounts
+} from './services/liveData';
 
 export function App() {
   // Master Currency State (Persisted in localStorage)
@@ -44,7 +50,9 @@ export function App() {
   const [currentTab, setCurrentTab] = useState<NavTab>('dashboard');
 
   // Application Data States (Hydrated with BigQuery authoritative records)
-  const [accounts, setAccounts] = useState(INITIAL_ACCOUNTS);
+  // Accounts: demo fixtures and live records are kept apart so sample data can never appear in Live mode.
+  const [demoAccounts, setDemoAccounts] = useState(INITIAL_ACCOUNTS);
+  const [liveAccounts, setLiveAccounts] = useState<LiveAccountsState>(INITIAL_LIVE_ACCOUNTS_STATE);
   const [envelopes, setEnvelopes] = useState(INITIAL_ENVELOPES);
   const [transactions, setTransactions] = useState(INITIAL_TRANSACTIONS);
   const [taxSchedule, setTaxSchedule] = useState(INITIAL_TAX_SCHEDULE);
@@ -56,34 +64,45 @@ export function App() {
   // Mobile Navigation Drawer State
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
 
+  // Monotonic id so a slow, superseded fetch can never overwrite newer state
+  const fetchSeqRef = useRef(0);
+
   // Live BigQuery Hydration
   const fetchLiveData = async () => {
+    const seq = ++fetchSeqRef.current;
+    const isCurrent = () => seq === fetchSeqRef.current;
     setIsRefreshing(true);
     try {
       await financeApi.checkHealth();
       
-      const [liveRates, liveAccounts, liveTxs, liveEnvelopes, liveTax] = await Promise.allSettled([
+      const [liveRates, liveAccountsResult, liveTxs, liveEnvelopes, liveTax] = await Promise.allSettled([
         financeApi.getExchangeRates(),
         financeApi.getAccounts(),
         financeApi.getTransactions(100),
         financeApi.getBudgetEnvelopes(),
         financeApi.getTaxSchedule()
       ]);
+      if (!isCurrent()) return;
 
       if (liveRates.status === 'fulfilled') setRates(liveRates.value);
-      if (liveAccounts.status === 'fulfilled' && liveAccounts.value.length > 0) setAccounts(liveAccounts.value);
+      // Live accounts: exactly what the API returned (empty stays empty; failure -> stale/unavailable, never demo)
+      setLiveAccounts((prev) => resolveLiveAccounts(liveAccountsResult, prev));
       if (liveTxs.status === 'fulfilled' && liveTxs.value.length > 0) setTransactions(liveTxs.value);
       if (liveEnvelopes.status === 'fulfilled' && liveEnvelopes.value.length > 0) setEnvelopes(liveEnvelopes.value);
       if (liveTax.status === 'fulfilled' && liveTax.value) setTaxSchedule(liveTax.value);
 
       setIsOnline(true);
     } catch (err) {
+      if (!isCurrent()) return;
       console.warn('BigQuery backend unreachable, operating in offline/demo mode:', err);
       setIsOnline(false);
     } finally {
-      setIsRefreshing(false);
+      if (isCurrent()) setIsRefreshing(false);
     }
   };
+
+  // Accounts rendered by every view: live records in Live mode, demo fixtures only in Demo mode
+  const accounts = selectDisplayedAccounts(isOnline, liveAccounts, demoAccounts);
 
   useEffect(() => {
     fetchLiveData();
@@ -109,9 +128,9 @@ export function App() {
   const handleAddTransaction = (newTx: Transaction) => {
     setTransactions((prev) => [newTx, ...prev]);
 
-    // 1. Update matching Account balance
-    setAccounts((prev) =>
-      prev.map((acc) => {
+    // 1. Update matching Account balance (only in the dataset currently displayed)
+    const applyTx = (list: typeof demoAccounts) =>
+      list.map((acc) => {
         if (acc.accountId === newTx.accountId) {
           return {
             ...acc,
@@ -119,8 +138,12 @@ export function App() {
           };
         }
         return acc;
-      })
-    );
+      });
+    if (isOnline) {
+      setLiveAccounts((prev) => ({ ...prev, data: applyTx(prev.data) }));
+    } else {
+      setDemoAccounts(applyTx);
+    }
 
     // 2. Update matching Budget Envelope
     setEnvelopes((prev) =>
@@ -205,6 +228,8 @@ export function App() {
           {currentTab === 'dashboard' && (
             <DashboardView
               accounts={accounts}
+              isLive={isOnline}
+              liveAccounts={liveAccounts}
               envelopes={envelopes}
               transactions={transactions}
               masterCurrency={masterCurrency}
@@ -219,6 +244,8 @@ export function App() {
           {currentTab === 'accounts' && (
             <AccountsView
               accounts={accounts}
+              isLive={isOnline}
+              liveAccounts={liveAccounts}
               masterCurrency={masterCurrency}
               rates={rates}
             />

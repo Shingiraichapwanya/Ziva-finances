@@ -2,15 +2,23 @@ import React, { useState } from 'react';
 import { Account, MasterCurrency, ExchangeRates, CashFlowTier } from '../../types/finance';
 import { convertCurrency } from '../../services/currency';
 import { Lock, Unlock, ShieldAlert, CreditCard, Landmark, Wallet, CheckCircle2 } from 'lucide-react';
+import { LiveAccountsState, describeTierInstitutions, hasDisplayableBalances } from '../../services/liveData';
+import { LiveAccountsNotice } from './LiveAccountsNotice';
 
 interface AccountsViewProps {
   accounts: Account[];
   masterCurrency: MasterCurrency;
   rates: ExchangeRates;
+  /** True when the top bar shows "BigQuery Live". */
+  isLive?: boolean;
+  liveAccounts?: LiveAccountsState;
 }
 
-export const AccountsView: React.FC<AccountsViewProps> = ({ accounts, masterCurrency, rates }) => {
+export const AccountsView: React.FC<AccountsViewProps> = ({ accounts, masterCurrency, rates, isLive = false, liveAccounts }) => {
   const [selectedTier, setSelectedTier] = useState<CashFlowTier | 'ALL'>('ALL');
+  const showBalances = !liveAccounts || hasDisplayableBalances(isLive, liveAccounts);
+  const formatTotal = (amount: number) =>
+    showBalances ? convertCurrency(amount, masterCurrency, masterCurrency, rates).formatted : '—';
 
   const tiers: { id: CashFlowTier | 'ALL'; label: string; desc: string }[] = [
     { id: 'ALL', label: 'All Accounts', desc: 'Consolidated portfolio view' },
@@ -45,6 +53,8 @@ export const AccountsView: React.FC<AccountsViewProps> = ({ accounts, masterCurr
         </div>
       </div>
 
+      {isLive && liveAccounts && <LiveAccountsNotice live={liveAccounts} />}
+
       {/* Tier Summary Cards */}
       <div className="tier-summary-row">
         <div
@@ -53,9 +63,9 @@ export const AccountsView: React.FC<AccountsViewProps> = ({ accounts, masterCurr
         >
           <div className="tier-badge-label">TIER 1 • DAILY</div>
           <div className="tier-amount mono">
-            {convertCurrency(tierTotals.DAILY_SPENDING, masterCurrency, masterCurrency, rates).formatted}
+            {formatTotal(tierTotals.DAILY_SPENDING)}
           </div>
-          <div className="tier-caption">Capitec & EcoCash USD/ZiG Wallets</div>
+          <div className="tier-caption">{describeTierInstitutions(accounts, 'DAILY_SPENDING')}</div>
         </div>
 
         <div
@@ -64,9 +74,9 @@ export const AccountsView: React.FC<AccountsViewProps> = ({ accounts, masterCurr
         >
           <div className="tier-badge-label">TIER 2 • MONTHLY</div>
           <div className="tier-amount mono">
-            {convertCurrency(tierTotals.MONTHLY_ALLOCATION, masterCurrency, masterCurrency, rates).formatted}
+            {formatTotal(tierTotals.MONTHLY_ALLOCATION)}
           </div>
-          <div className="tier-caption">FNB Fusion & Stanbic Nostro FCA</div>
+          <div className="tier-caption">{describeTierInstitutions(accounts, 'MONTHLY_ALLOCATION')}</div>
         </div>
 
         <div
@@ -75,9 +85,9 @@ export const AccountsView: React.FC<AccountsViewProps> = ({ accounts, masterCurr
         >
           <div className="tier-badge-label text-gold">TIER 3 • VAULT</div>
           <div className="tier-amount mono text-gold">
-            {convertCurrency(tierTotals.LONG_TERM_VAULT, masterCurrency, masterCurrency, rates).formatted}
+            {formatTotal(tierTotals.LONG_TERM_VAULT)}
           </div>
-          <div className="tier-caption">Discovery Notice & EasyEquities</div>
+          <div className="tier-caption">{describeTierInstitutions(accounts, 'LONG_TERM_VAULT')}</div>
         </div>
       </div>
 
@@ -95,6 +105,17 @@ export const AccountsView: React.FC<AccountsViewProps> = ({ accounts, masterCurr
       </div>
 
       {/* Accounts Grid */}
+      {filteredAccounts.length === 0 && (!isLive || liveAccounts?.status !== 'unavailable') && (
+        <div className="glass-panel live-empty-state" id="accounts-empty-state">
+          {isLive
+            ? (liveAccounts?.status === 'loading'
+                ? 'Loading accounts from the live database…'
+                : selectedTier === 'ALL'
+                  ? 'No accounts exist in the live database yet.'
+                  : 'No live accounts in this tier.')
+            : 'No accounts in this tier.'}
+        </div>
+      )}
       <div className="accounts-grid">
         {filteredAccounts.map((acc) => {
           const conv = convertCurrency(acc.nativeBalance, acc.primaryCurrency, masterCurrency, rates);

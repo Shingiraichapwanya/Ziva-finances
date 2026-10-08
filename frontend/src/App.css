@@ -3331,4 +3331,25 @@
   }
 }
 
+/* Live account provenance notices (BigQuery Live mode) */
+.live-notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  font-size: 13px;
+  line-height: 1.4;
+  border-left: 3px solid rgba(94, 234, 212, 0.7);
+}
+.live-notice-warn { border-left-color: rgba(251, 191, 36, 0.85); color: #fcd34d; }
+.live-notice-error { border-left-color: rgba(244, 63, 94, 0.85); color: #fda4af; }
+.live-empty-state {
+  padding: 28px 20px;
+  margin-bottom: 16px;
+  text-align: center;
+  font-size: 14px;
+  opacity: 0.8;
+}
+
 

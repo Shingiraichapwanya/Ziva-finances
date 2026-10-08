@@ -5,14 +5,15 @@
  */
 
 import { GoogleGenAI } from '@google/genai';
-import {
+import sheetsRepo from '../services/googleSheetsRepository.js';
+const {
   getAccounts,
   getTransactions,
   getBudgetEnvelopes,
   getTaxSchedule,
   getDailyBurnMetrics,
   getExchangeRates
-} from './bigquery.js';
+} = sheetsRepo;
 
 /**
  * Generate comprehensive predictive insights and runway metrics from BigQuery
