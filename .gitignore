@@ -11,10 +11,17 @@ mobile-bigquery-client*.json
 mobile/assets/credentials/
 credentials/
 .env
+.env.*
 !.env.example
+*client_secret*.json
+application_default_credentials.json
+*.pem
+*.key
 **/ios/Flutter/ephemeral/
 **/ios/Flutter/Generated.xcconfig
 **/ios/Flutter/flutter_export_environment.sh
 **/.metadata
 **/build/
 scratch/
+*.traineddata
+backend/data/

@@ -173,17 +173,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
           })}
         </nav>
 
-        {/* Warehouse Anchor Footer */}
+        {/* Live Engine Anchor Footer */}
         <div className="sidebar-footer">
           <div className="warehouse-info-card">
             <div className="wh-header">
               <span className="wh-dot pulse-live" />
-              <span className="wh-title">BigQuery Data Warehouse</span>
+              <span className="wh-title">Google Sheets Live</span>
             </div>
             <div className="wh-details mono">
-              <div>Project: budget-tracker-507418</div>
-              <div>Dataset: personal_finance</div>
-              <div>Region: africa-south1</div>
+              <div>Engine: Sheets REST API</div>
+              <div>Billing: 100% Free Sandbox</div>
+              <div>Status: Live Sync Active</div>
             </div>
           </div>
         </div>

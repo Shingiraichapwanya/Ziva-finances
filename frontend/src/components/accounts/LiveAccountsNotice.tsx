@@ -7,7 +7,7 @@ interface LiveAccountsNoticeProps {
 }
 
 /**
- * Explains the provenance of account data shown under the "BigQuery Live" badge.
+ * Explains the provenance of account data shown under the "Google Sheets Live" badge.
  * Renders nothing when fresh live records are displayed.
  */
 export const LiveAccountsNotice: React.FC<LiveAccountsNoticeProps> = ({ live }) => {

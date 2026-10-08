@@ -3,7 +3,7 @@
  * Mirrored directly from BigQuery tables and analytical views in budget-tracker-507418.personal_finance
  */
 
-import {
+import type {
   Account,
   BudgetEnvelope,
   Transaction,
@@ -11,8 +11,11 @@ import {
   PredictiveBurnMetrics,
   TaxShieldOpportunity,
   ArbitrageSignal,
-  InvestmentCounter
-} from '../types/finance';
+  InvestmentCounter,
+  DebtRecord,
+  DebtBalance,
+  PerformanceSummary
+} from '../types/finance.ts';
 
 export const INITIAL_ACCOUNTS: Account[] = [
   // South Africa
@@ -645,3 +648,140 @@ export const INITIAL_INVESTMENTS: InvestmentCounter[] = [
     }
   }
 ];
+
+export const INITIAL_DEMO_DEBTS: DebtRecord[] = [
+  {
+    id: 'DEBT-DEMO-001',
+    personName: 'Tendai Moyo',
+    direction: 'owed_to_me',
+    amount: 250,
+    currency: 'USD',
+    date: '2026-09-15',
+    status: 'Pending',
+    notes: 'Short-term bridge for hardware import duty',
+    createdAt: '2026-09-15T10:00:00Z',
+    updatedAt: '2026-09-15T10:00:00Z'
+  },
+  {
+    id: 'DEBT-DEMO-002',
+    personName: 'Lerato Khumalo',
+    direction: 'owed_by_me',
+    amount: 1500,
+    currency: 'ZAR',
+    date: '2026-09-28',
+    status: 'Pending',
+    notes: 'Coworking space group membership split',
+    createdAt: '2026-09-28T14:30:00Z',
+    updatedAt: '2026-09-28T14:30:00Z'
+  },
+  {
+    id: 'DEBT-DEMO-003',
+    personName: 'Farai Chitepo',
+    direction: 'owed_to_me',
+    amount: 100,
+    currency: 'USD',
+    date: '2026-08-10',
+    status: 'Settled',
+    notes: 'Starlink kit customs reimbursement',
+    createdAt: '2026-08-10T09:00:00Z',
+    updatedAt: '2026-08-25T16:00:00Z'
+  }
+];
+
+export const INITIAL_DEMO_DEBT_BALANCES: DebtBalance[] = [
+  {
+    personName: 'Tendai Moyo',
+    totalOwedToMe: 250,
+    totalOwedByMe: 0,
+    netBalance: 250,
+    balanceDirection: 'they_owe_me'
+  },
+  {
+    personName: 'Lerato Khumalo',
+    totalOwedToMe: 0,
+    totalOwedByMe: 1500,
+    netBalance: -1500,
+    balanceDirection: 'i_owe_them'
+  }
+];
+
+export const INITIAL_DEMO_PERFORMANCE_SUMMARY: PerformanceSummary = {
+  kpis: {
+    savingsRatePct: 41.5,
+    operatingMarginPct: 53.2,
+    rolling7dAvgSpendZar: 1420,
+    rolling7dAvgSpendUsd: 77.8,
+    latestDailySpendZar: 1150,
+    burnAlertStatus: 'NORMAL',
+    burnVelocityRatio: 0.81,
+    netCashSurplusZar: 23500,
+    netCashSurplusUsd: 1287.67,
+    grossOperatingRevenueZar: 56500,
+    grossOperatingRevenueUsd: 3095.89,
+    monthlyProjectedGainZar: 3200,
+    monthlyProjectedGainUsd: 175.34
+  },
+  spendHabits: [
+    {
+      categoryGroup: 'LIVING_ESSENTIALS',
+      categoryName: 'Groceries & Household Sustenance',
+      transactionCount: 14,
+      totalSpentZar: 8500,
+      totalSpentUsd: 465.75,
+      pctOfTotalSpend: 25.7
+    },
+    {
+      categoryGroup: 'OPERATIONAL_EXPENSE',
+      categoryName: 'Productivity Tech & Work Hardware',
+      transactionCount: 6,
+      totalSpentZar: 11200,
+      totalSpentUsd: 613.70,
+      pctOfTotalSpend: 33.9
+    },
+    {
+      categoryGroup: 'DISCRETIONARY',
+      categoryName: 'Dining & Specialty Coffee',
+      transactionCount: 18,
+      totalSpentZar: 4200,
+      totalSpentUsd: 230.14,
+      pctOfTotalSpend: 12.7
+    }
+  ],
+  monthlyTrends: [
+    {
+      statementPeriod: '2026-07',
+      periodStartDate: '2026-07-01',
+      operatingRevenueZar: 52000,
+      operatingRevenueUsd: 2849.32,
+      totalOutflowsZar: 31000,
+      netSurplusZar: 21000,
+      netSurplusUsd: 1150.68,
+      savingsRatePct: 40.4,
+      operatingMarginPct: 51.5
+    },
+    {
+      statementPeriod: '2026-08',
+      periodStartDate: '2026-08-01',
+      operatingRevenueZar: 54500,
+      operatingRevenueUsd: 2986.30,
+      totalOutflowsZar: 32200,
+      netSurplusZar: 22300,
+      netSurplusUsd: 1221.92,
+      savingsRatePct: 40.9,
+      operatingMarginPct: 52.1
+    },
+    {
+      statementPeriod: '2026-09',
+      periodStartDate: '2026-09-01',
+      operatingRevenueZar: 56500,
+      operatingRevenueUsd: 3095.89,
+      totalOutflowsZar: 33000,
+      netSurplusZar: 23500,
+      netSurplusUsd: 1287.67,
+      savingsRatePct: 41.5,
+      operatingMarginPct: 53.2
+    }
+  ],
+  statements: [],
+  nonOperatingGains: []
+};

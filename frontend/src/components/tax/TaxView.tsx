@@ -2,30 +2,36 @@ import React from 'react';
 import { TaxQuarterSchedule, Transaction, MasterCurrency, ExchangeRates } from '../../types/finance';
 import { convertCurrency } from '../../services/currency';
 import { Landmark, ShieldCheck, FileCheck, CheckCircle2, AlertCircle } from 'lucide-react';
+import type { LiveTaxState } from '../../services/liveData';
+import { LiveStatusNotice } from '../common/LiveStatusNotice';
 
 interface TaxViewProps {
-  taxSchedule: TaxQuarterSchedule;
+  taxSchedule: TaxQuarterSchedule | null;
   transactions: Transaction[];
   masterCurrency: MasterCurrency;
   rates: ExchangeRates;
+  isLive?: boolean;
+  liveTax?: LiveTaxState;
 }
 
 export const TaxView: React.FC<TaxViewProps> = ({
   taxSchedule,
   transactions,
   masterCurrency,
-  rates
+  rates,
+  isLive = false,
+  liveTax
 }) => {
   const deductibleTransactions = transactions.filter((t) => t.isTaxDeductible);
 
-  const grossConv = convertCurrency(taxSchedule.grossTaxableInflowZar, 'ZAR', masterCurrency, rates);
-  const deductionsConv = convertCurrency(taxSchedule.totalAllowableDeductionsZar, 'ZAR', masterCurrency, rates);
-  const netTaxableConv = convertCurrency(taxSchedule.netTaxableIncomeZar, 'ZAR', masterCurrency, rates);
-  const estimatedTaxConv = convertCurrency(taxSchedule.estimatedTaxLiabilityZar, 'ZAR', masterCurrency, rates);
-  const actualPaidConv = convertCurrency(taxSchedule.actualTaxPaidZar, 'ZAR', masterCurrency, rates);
-  const outstandingConv = convertCurrency(taxSchedule.netTaxOutstandingZar, 'ZAR', masterCurrency, rates);
+  const grossConv = taxSchedule ? convertCurrency(taxSchedule.grossTaxableInflowZar, 'ZAR', masterCurrency, rates) : null;
+  const deductionsConv = taxSchedule ? convertCurrency(taxSchedule.totalAllowableDeductionsZar, 'ZAR', masterCurrency, rates) : null;
+  const netTaxableConv = taxSchedule ? convertCurrency(taxSchedule.netTaxableIncomeZar, 'ZAR', masterCurrency, rates) : null;
+  const estimatedTaxConv = taxSchedule ? convertCurrency(taxSchedule.estimatedTaxLiabilityZar, 'ZAR', masterCurrency, rates) : null;
+  const actualPaidConv = taxSchedule ? convertCurrency(taxSchedule.actualTaxPaidZar, 'ZAR', masterCurrency, rates) : null;
+  const outstandingConv = taxSchedule ? convertCurrency(taxSchedule.netTaxOutstandingZar, 'ZAR', masterCurrency, rates) : null;
 
-  const isCreditSurplus = taxSchedule.netTaxOutstandingZar < 0;
+  const isCreditSurplus = taxSchedule ? taxSchedule.netTaxOutstandingZar < 0 : false;
 
   return (
     <div className="tax-view animate-fade-in">
@@ -33,46 +39,73 @@ export const TaxView: React.FC<TaxViewProps> = ({
         <div>
           <h2>Tax Compliance & Business Offsets (SARS / ZIMRA)</h2>
           <p className="page-subtitle">
-            Quarterly provisional tax liability calculations derived from BigQuery view <code className="mono">v_quarterly_tax_liability_schedule</code>.
+            Quarterly provisional tax liability calculations derived from verified ledger records and deductions in Google Sheets.
           </p>
         </div>
-        <div>
-          <span className="badge badge-emerald">
-            <CheckCircle2 size={14} /> 2026-Q3 Status: {taxSchedule.taxSettlementStatus}
-          </span>
-        </div>
+        {taxSchedule && (
+          <div>
+            <span className="badge badge-emerald">
+              <CheckCircle2 size={14} /> {taxSchedule.taxQuarter} Status: {taxSchedule.taxSettlementStatus}
+            </span>
+          </div>
+        )}
       </div>
 
-      {/* Primary Tax Calculation Meter */}
-      <div className="glass-panel tax-meter-card">
-        <div className="tax-calc-grid">
-          <div className="calc-block">
-            <div className="calc-label">Gross Taxable Revenue</div>
-            <div className="calc-val mono">{grossConv.formatted}</div>
-            <div className="calc-hint text-muted">Consulting & Inflows</div>
-          </div>
+      {isLive && liveTax && (
+        <LiveStatusNotice
+          status={liveTax.status}
+          verifiedAt={liveTax.verifiedAt}
+          error={liveTax.error}
+          entityName="tax schedule"
+          emptyMessage="The live database returned no tax calculation. Projections will calculate once live revenue and deductible expenses are recorded in Google Sheets."
+          idPrefix="live-tax"
+        />
+      )}
 
-          <div className="calc-operator">−</div>
+      {!taxSchedule ? (
+        <div className="glass-panel empty-state-card" style={{ padding: '3.5rem 2rem', textAlign: 'center', marginTop: '1.5rem', borderRadius: '12px' }}>
+          <Landmark size={44} className="text-muted" style={{ margin: '0 auto 1rem', opacity: 0.6 }} />
+          <h3 style={{ fontSize: '1.25rem', marginBottom: '0.5rem' }}>
+            {isLive ? (liveTax?.status === 'unavailable' ? 'Live Tax Schedule Unavailable' : 'No Live Tax Calculations Available') : 'No Tax Schedule'}
+          </h3>
+          <p className="text-muted" style={{ maxWidth: 520, margin: '0 auto', fontSize: '0.9rem', lineHeight: 1.5 }}>
+            {liveTax?.status === 'unavailable'
+              ? `Failed to load tax schedule: ${liveTax.error || 'Server error'}. No provisional tax liability is computed until the database responds.`
+              : 'Provisional tax liability requires recorded income and deductible expenses in Google Sheets. Once ledger transactions are logged, SARS and ZIMRA compliance calculations will generate automatically.'}
+          </p>
+        </div>
+      ) : (
+        <>
+          {/* Primary Tax Calculation Meter */}
+          <div className="glass-panel tax-meter-card">
+            <div className="tax-calc-grid">
+              <div className="calc-block">
+                <div className="calc-label">Gross Taxable Revenue</div>
+                <div className="calc-val mono">{grossConv?.formatted}</div>
+                <div className="calc-hint text-muted">Consulting & Inflows</div>
+              </div>
 
-          <div className="calc-block">
-            <div className="calc-label">Total Allowable Deductions</div>
-            <div className="calc-val mono text-emerald">{deductionsConv.formatted}</div>
-            <div className="calc-hint text-emerald">Tech Hardware, Cloud, Fibre</div>
-          </div>
+              <div className="calc-operator">−</div>
+
+              <div className="calc-block">
+                <div className="calc-label">Total Allowable Deductions</div>
+                <div className="calc-val mono text-emerald">{deductionsConv?.formatted}</div>
+                <div className="calc-hint text-emerald">Tech Hardware, Cloud, Fibre</div>
+              </div>
 
           <div className="calc-operator">=</div>
 
           <div className="calc-block">
             <div className="calc-label">Net Taxable Income</div>
-            <div className="calc-val mono text-gold">{netTaxableConv.formatted}</div>
+            <div className="calc-val mono text-gold">{netTaxableConv?.formatted ?? '—'}</div>
             <div className="calc-hint text-gold">Provisional Base</div>
           </div>
 
-          <div className="calc-operator">× 27% =</div>
+          <div className="calc-operator">× {((taxSchedule.effectiveTaxRate || 0.27) * 100).toFixed(0)}% =</div>
 
           <div className="calc-block calc-block-highlight">
             <div className="calc-label">Est. Tax Liability</div>
-            <div className="calc-val mono text-primary">{estimatedTaxConv.formatted}</div>
+            <div className="calc-val mono text-primary">{estimatedTaxConv?.formatted ?? '—'}</div>
             <div className="calc-hint text-muted">Benchmark Provisional</div>
           </div>
         </div>
@@ -81,15 +114,19 @@ export const TaxView: React.FC<TaxViewProps> = ({
         <div className="tax-settlement-bar">
           <div>
             <span className="settle-label">Actual Statutory Remittances:</span>{' '}
-            <strong className="mono">{actualPaidConv.formatted}</strong>{' '}
+            <strong className="mono">{actualPaidConv?.formatted ?? '—'}</strong>{' '}
             <span className="text-muted text-xs">(IRP6 / QPD payments to SARS/ZIMRA)</span>
           </div>
           <div>
             <span className="settle-label">Net Settlement Position:</span>{' '}
             <strong className={`mono ${isCreditSurplus ? 'text-emerald' : 'text-rose'}`}>
-              {isCreditSurplus ? `+${Math.abs(taxSchedule.netTaxOutstandingZar).toFixed(2)} (Credit Surplus)` : outstandingConv.formatted}
+              {isCreditSurplus ? `+${Math.abs(taxSchedule.netTaxOutstandingZar).toFixed(2)} (Credit Surplus)` : (outstandingConv?.formatted ?? '—')}
             </strong>
           </div>
+        </div>
+
+        <div style={{ marginTop: '0.75rem', padding: '0.6rem 0.8rem', background: 'rgba(255,255,255,0.03)', borderRadius: '6px', fontSize: '0.75rem', color: '#94a3b8', lineHeight: 1.4 }}>
+          <strong>Provisional Tax Benchmark Disclosure:</strong> Modeled using the South African 27.00% corporate provisional benchmark rate. Individual marginal rates, rebates, and ZIMRA progressive scales differ. Illustrative planning estimate only; does not constitute professional tax advice.
         </div>
       </div>
 
@@ -158,6 +195,9 @@ export const TaxView: React.FC<TaxViewProps> = ({
           </tbody>
         </table>
       </div>
+      </>
+      )}
     </div>
   );
 };
+

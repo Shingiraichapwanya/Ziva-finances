@@ -12,6 +12,7 @@ const {
   getBudgetEnvelopes,
   getTaxSchedule,
   getDailyBurnMetrics,
+  getBurnRateSummary,
   getExchangeRates
 } = sheetsRepo;
 
@@ -19,17 +20,17 @@ const {
  * Generate comprehensive predictive insights and runway metrics from BigQuery
  */
 export async function getCopilotInsights() {
-  const [accounts, transactions, envelopes, taxSchedule, burnMetrics, rates] = await Promise.all([
+  const [accounts, transactions, envelopes, taxSchedule, burnSummary, rates] = await Promise.all([
     getAccounts(),
     getTransactions(50),
     getBudgetEnvelopes(),
     getTaxSchedule(),
-    getDailyBurnMetrics(),
+    getBurnRateSummary(),
     getExchangeRates()
   ]);
 
-  // 1. Calculate Liquid Reserves (Tier 1 Daily + Tier 2 Monthly in ZAR)
-  let liquidReserveZar = 0;
+  // 1. Calculate Liquid Reserves & Vault from grounded accounts
+  const liquidReserveZar = burnSummary.metrics.liquidReserveBalanceZar;
   let vaultTotalZar = 0;
 
   accounts.forEach((acc) => {
@@ -37,29 +38,17 @@ export async function getCopilotInsights() {
     if (acc.primaryCurrency === 'USD') nativeInZar = acc.nativeBalance * rates.USD_TO_ZAR;
     else if (acc.primaryCurrency === 'ZiG') nativeInZar = acc.nativeBalance / rates.ZAR_TO_ZIG_PARALLEL;
 
-    if (acc.cashFlowTier === 'DAILY_SPENDING' || acc.cashFlowTier === 'MONTHLY_ALLOCATION') {
-      liquidReserveZar += nativeInZar;
-    } else if (acc.cashFlowTier === 'LONG_TERM_VAULT') {
+    if (acc.cashFlowTier === 'LONG_TERM_VAULT') {
       vaultTotalZar += nativeInZar;
     }
   });
 
-  // 2. Daily Burn Rate & Velocity
-  let avgDailyBurnZar = 650; // default baseline
-  if (burnMetrics.length > 0) {
-    const totalDaily = burnMetrics.reduce((sum, b) => sum + b.dailySpendZar, 0);
-    avgDailyBurnZar = Math.max(100, Math.round(totalDaily / burnMetrics.length));
-  }
-
-  const baselineRunwayDays = avgDailyBurnZar > 0 ? Math.max(0, Math.floor(liquidReserveZar / avgDailyBurnZar)) : 999;
-  const survivalDate = new Date(Date.now() + baselineRunwayDays * 86400000).toISOString().split('T')[0];
-
-  // Fixed monthly commitments from envelopes
-  const fixedCommitmentsZar = envelopes
-    .filter((e) => e.isFixedObligation)
-    .reduce((sum, e) => sum + e.plannedAmountZar, 0);
-
-  const fixedRunwayDays = fixedCommitmentsZar > 0 ? Math.floor(liquidReserveZar / (fixedCommitmentsZar / 30)) : 999;
+  // 2. Daily Burn Rate & Velocity from shared ground truth
+  const avgDailyBurnZar = burnSummary.metrics.averageDailyBurnZar;
+  const baselineRunwayDays = burnSummary.metrics.baselineRunwayDays;
+  const survivalDate = burnSummary.metrics.survivalDate;
+  const fixedCommitmentsZar = burnSummary.metrics.monthlyFixedCommitmentsZar;
+  const fixedRunwayDays = burnSummary.metrics.fixedObligationsRunwayDays;
 
   // 3. Proactive Tax Shield & Deduction Insights
   const missingInvoiceTxs = transactions.filter((t) => t.isTaxDeductible && !t.taxInvoiceNumber);

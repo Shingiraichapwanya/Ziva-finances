@@ -11,24 +11,59 @@ import { financeApi, CopilotInsightsResponse } from '../../services/api';
 interface CopilotBriefingCardProps {
   onOpenCopilot: () => void;
   masterCurrency: MasterCurrency;
+  isLive?: boolean;
 }
+
+const DEMO_INSIGHTS: CopilotInsightsResponse = {
+  metrics: {
+    liquidReserveZar: 201250,
+    vaultTotalZar: 1100000,
+    averageDailyBurnZar: 1420,
+    baselineRunwayDays: 141,
+    fixedObligationsRunwayDays: 245,
+    survivalDate: '2027-01-23',
+    monthlyFixedCommitmentsZar: 24000,
+    taxSavingsAtRiskZar: 2430,
+    taxDeductibleUnverifiedCount: 2,
+    spreadPct: 77,
+    burnStatus: 'OPTIMAL'
+  },
+  insights: [],
+  generatedAt: new Date().toISOString()
+};
 
 export const CopilotBriefingCard: React.FC<CopilotBriefingCardProps> = ({
   onOpenCopilot,
-  masterCurrency
+  masterCurrency,
+  isLive = false
 }) => {
   const [data, setData] = useState<CopilotInsightsResponse | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
 
   useEffect(() => {
+    if (!isLive) {
+      // Demo Mode: strictly use demo fixtures, zero live API calls
+      setData(DEMO_INSIGHTS);
+      setIsLoading(false);
+      return;
+    }
+
+    setIsLoading(true);
     financeApi
       .getCopilotInsights()
-      .then(setData)
-      .catch((err) => console.warn('Briefing card insights error:', err));
-  }, []);
+      .then((res) => {
+        setData(res);
+      })
+      .catch((err) => {
+        console.warn('Briefing card insights error:', err);
+        setData(null);
+      })
+      .finally(() => setIsLoading(false));
+  }, [isLive]);
 
-  const runwayDays = data?.metrics.baselineRunwayDays || 45;
-  const taxAtRisk = data?.metrics.taxSavingsAtRiskZar || 12638;
-  const spread = data?.metrics.spreadPct || 77;
+  const runwayDays = data ? data.metrics.baselineRunwayDays : null;
+  const taxAtRisk = data ? data.metrics.taxSavingsAtRiskZar : null;
+  const spread = data ? data.metrics.spreadPct : null;
 
   return (
     <div className="glass-panel copilot-briefing-card animate-fade-in">
@@ -37,10 +72,12 @@ export const CopilotBriefingCard: React.FC<CopilotBriefingCardProps> = ({
         <div className="briefing-header">
           <div className="briefing-badge">
             <Sparkles size={14} className="text-gold" />
-            <span>GEMINI FINANCIAL INTELLIGENCE BRIEFING</span>
+            <span>{isLive ? 'GEMINI LIVE INTELLIGENCE BRIEFING' : 'DEMO FINANCIAL INTELLIGENCE BRIEFING'}</span>
           </div>
           <span className="mono briefing-date">
-            Grounded in BigQuery • {new Date().toLocaleDateString('en-ZA', { month: 'short', day: 'numeric', year: 'numeric' })}
+            {isLive
+              ? `Grounded in Google Sheets Live • ${new Date().toLocaleDateString('en-ZA', { month: 'short', day: 'numeric', year: 'numeric' })}`
+              : 'Interactive Demo Environment'}
           </span>
         </div>
 
@@ -50,9 +87,13 @@ export const CopilotBriefingCard: React.FC<CopilotBriefingCardProps> = ({
               <Zap size={16} className="text-cyan" />
             </div>
             <div>
-              <div className="briefing-item-title mono">{runwayDays} Days Liquid Runway</div>
+              <div className="briefing-item-title mono">
+                {isLoading ? 'Calculating...' : runwayDays !== null ? `${runwayDays} Days Liquid Runway` : 'Runway Unavailable'}
+              </div>
               <div className="briefing-item-sub">
-                Burn velocity is {data?.metrics.burnStatus || 'STABLE'}. Projected exhaustion date: {data?.metrics.survivalDate || '2026-10-20'}.
+                {data
+                  ? `Burn velocity is ${data.metrics.burnStatus || 'STABLE'}. Projected exhaustion date: ${data.metrics.survivalDate || 'N/A'}.`
+                  : 'Connect or ingest transactions to project liquid survival date.'}
               </div>
             </div>
           </div>
@@ -62,9 +103,13 @@ export const CopilotBriefingCard: React.FC<CopilotBriefingCardProps> = ({
               <ShieldAlert size={16} className="text-gold" />
             </div>
             <div>
-              <div className="briefing-item-title mono">R{taxAtRisk.toLocaleString()} Tax Write-offs at Risk</div>
+              <div className="briefing-item-title mono">
+                {isLoading ? 'Scanning Invoices...' : taxAtRisk !== null ? `R${taxAtRisk.toLocaleString()} Tax Write-offs at Risk` : 'Tax Deductions Verified'}
+              </div>
               <div className="briefing-item-sub">
-                Unattached vendor invoices pending SARS 27% section 11(a) deduction audit.
+                {taxAtRisk && taxAtRisk > 0
+                  ? 'Unattached vendor invoices pending SARS 27% section 11(a) deduction audit.'
+                  : 'All recorded tax-deductible expenses have valid invoices attached.'}
               </div>
             </div>
           </div>
@@ -74,9 +119,13 @@ export const CopilotBriefingCard: React.FC<CopilotBriefingCardProps> = ({
               <Layers size={16} className="text-emerald" />
             </div>
             <div>
-              <div className="briefing-item-title mono">+{spread}% Parallel Spread Advantage</div>
+              <div className="briefing-item-title mono">
+                {isLoading ? 'Checking FX Rates...' : spread !== null ? `+${spread}% Parallel Spread Advantage` : 'Parallel Rates Inactive'}
+              </div>
               <div className="briefing-item-sub">
-                Official POS card swipe unlocks statutory retail savings vs holding volatile cash.
+                {spread && spread > 0
+                  ? 'Official POS card swipe unlocks statutory retail savings vs holding volatile cash.'
+                  : 'Multi-currency interbank and retail rates are currently trading at parity.'}
               </div>
             </div>
           </div>

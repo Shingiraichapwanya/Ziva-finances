@@ -31,6 +31,7 @@ interface GeminiCopilotDrawerProps {
   onClose: () => void;
   masterCurrency: MasterCurrency;
   rates: ExchangeRates;
+  isLive?: boolean;
 }
 
 interface ChatMessage {
@@ -48,11 +49,30 @@ const QUICK_PROMPTS = [
   'Which budget envelope is burning velocity fastest?'
 ];
 
+const DEMO_DRAWER_INSIGHTS: CopilotInsightsResponse = {
+  metrics: {
+    liquidReserveZar: 201250,
+    vaultTotalZar: 1100000,
+    averageDailyBurnZar: 1420,
+    baselineRunwayDays: 141,
+    fixedObligationsRunwayDays: 245,
+    survivalDate: '2027-01-23',
+    monthlyFixedCommitmentsZar: 24000,
+    taxSavingsAtRiskZar: 2430,
+    taxDeductibleUnverifiedCount: 2,
+    spreadPct: 77,
+    burnStatus: 'OPTIMAL'
+  },
+  insights: [],
+  generatedAt: new Date().toISOString()
+};
+
 export const GeminiCopilotDrawer: React.FC<GeminiCopilotDrawerProps> = ({
   isOpen,
   onClose,
   masterCurrency,
-  rates
+  rates,
+  isLive = false
 }) => {
   const [data, setData] = useState<CopilotInsightsResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -73,6 +93,24 @@ export const GeminiCopilotDrawer: React.FC<GeminiCopilotDrawerProps> = ({
   // Fetch insights when opened
   useEffect(() => {
     if (isOpen) {
+      if (!isLive) {
+        // Demo Mode: strictly use demo fixtures, zero live API calls
+        setData(DEMO_DRAWER_INSIGHTS);
+        if (messages.length === 0) {
+          setMessages([
+            {
+              id: 'welcome-demo',
+              role: 'assistant',
+              text: `👋 **Hello! I am your Gemini Financial Copilot (Demo Mode).**\n\nI am analyzing your demo accounts and budget allocations. In this simulated environment, you have **141 days of liquid runway** and **R2,430** in potential SARS tax write-offs.\n\nAsk me about scenarios, multi-currency strategies, or budget envelopes!`,
+              model: 'Interactive Demo Reasoner',
+              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            }
+          ]);
+        }
+        setLoading(false);
+        return;
+      }
+
       setLoading(true);
       financeApi
         .getCopilotInsights()
@@ -83,7 +121,7 @@ export const GeminiCopilotDrawer: React.FC<GeminiCopilotDrawerProps> = ({
               {
                 id: 'welcome-1',
                 role: 'assistant',
-                text: `👋 **Hello! I am your Gemini Financial Copilot.**\n\nI am continuously analyzing your partitions in BigQuery (\`budget-tracker-507418.personal_finance\`). You currently have **${res.metrics.baselineRunwayDays} days of liquid runway** and **R${res.metrics.taxSavingsAtRiskZar.toLocaleString()}** in potential SARS tax write-offs requiring verified invoices.\n\nHow can I help optimize your cash flow or tax strategy today?`,
+                text: `👋 **Hello! I am your Gemini Financial Copilot.**\n\nI am continuously analyzing your live Google Sheets records and budgets. You currently have **${res.metrics.baselineRunwayDays} days of liquid runway** and **R${res.metrics.taxSavingsAtRiskZar.toLocaleString()}** in potential SARS tax write-offs requiring verified invoices.\n\nHow can I help optimize your cash flow or tax strategy today?`,
                 model: apiKey ? 'Gemini 2.5 Flash' : 'Built-in Financial Reasoner',
                 timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
               }
@@ -95,7 +133,7 @@ export const GeminiCopilotDrawer: React.FC<GeminiCopilotDrawerProps> = ({
         })
         .finally(() => setLoading(false));
     }
-  }, [isOpen]);
+  }, [isOpen, isLive]);
 
   // Scroll chat to bottom
   useEffect(() => {
@@ -177,7 +215,7 @@ export const GeminiCopilotDrawer: React.FC<GeminiCopilotDrawerProps> = ({
                   {apiKey ? 'GEMINI 2.5 FLASH' : 'LOCAL REASONER'}
                 </span>
               </div>
-              <div className="copilot-subheading">BigQuery-Grounded Financial Intelligence</div>
+              <div className="copilot-subheading">Live Financial Intelligence</div>
             </div>
           </div>
 
@@ -295,7 +333,7 @@ export const GeminiCopilotDrawer: React.FC<GeminiCopilotDrawerProps> = ({
             <div className="copilot-insights-section">
               <div className="section-subtitle">
                 <Flame size={14} className="text-gold" />
-                <span>ACTIVE BIGQUERY INTELLIGENCE ALERTS</span>
+                <span>ACTIVE LIVE FINANCIAL ALERTS</span>
               </div>
               <div className="copilot-insights-list">
                 {data.insights.map((ins: CopilotInsightItem) => (
@@ -342,7 +380,7 @@ export const GeminiCopilotDrawer: React.FC<GeminiCopilotDrawerProps> = ({
               {sending && (
                 <div className="chat-bubble chat-bubble-assistant loading-bubble">
                   <Sparkles size={14} className="animate-spin text-gold" />
-                  <span>Gemini is synthesizing BigQuery ledger data...</span>
+                  <span>Gemini is synthesizing live ledger data...</span>
                 </div>
               )}
               <div ref={chatEndRef} />

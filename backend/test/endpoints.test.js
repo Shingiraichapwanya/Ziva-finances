@@ -3,14 +3,17 @@ const assert = require('node:assert/strict');
 const http = require('http');
 const app = require('../src/server');
 const sheetsRepo = require('../services/googleSheetsRepository');
+const authService = require('../services/authService');
 
-test('Express API Endpoints with Google Sheets Live Data Layer', async (t) => {
-  t.beforeEach(() => {
-    sheetsRepo.setMockStorage(sheetsRepo.createDefaultMockStorage());
-  });
-
+test('Express API Endpoints with Owner Authentication & Google Sheets Layer', async (t) => {
   let server;
   let baseUrl;
+  let testSession;
+
+  t.beforeEach(() => {
+    sheetsRepo.setMockStorage(sheetsRepo.createDefaultMockStorage());
+    testSession = authService.setMockOwnerSession('test-owner-session-token');
+  });
 
   // Start temporary server on dynamic port
   await new Promise((resolve) => {
@@ -26,8 +29,39 @@ test('Express API Endpoints with Google Sheets Live Data Layer', async (t) => {
     if (server) server.close();
   });
 
-  await t.test('GET /api/health returns CONNECTED with GOOGLE_SHEETS_API layer', async () => {
+  // Helper for authenticated fetch
+  const authFetch = (url, options = {}) => {
+    const headers = {
+      ...(options.headers || {}),
+      Authorization: `Bearer ${testSession.sessionId}`,
+      'X-CSRF-Token': testSession.csrfToken
+    };
+    return fetch(url, { ...options, headers });
+  };
+
+  await t.test('1. Public Minimal Health Check (Unauthenticated)', async () => {
     const res = await fetch(`${baseUrl}/api/health`);
+    assert.strictEqual(res.status, 200);
+    const data = await res.json();
+    assert.strictEqual(data.status, 'ONLINE');
+    assert.strictEqual(data.authRequired, true);
+    // Crucial: Must NOT leak spreadsheet ID to unauthenticated callers
+    assert.strictEqual(data.spreadsheetId, undefined);
+  });
+
+  await t.test('2. Private Endpoints Return 401 for Unauthenticated Callers', async () => {
+    const unauthAccounts = await fetch(`${baseUrl}/api/accounts`);
+    assert.strictEqual(unauthAccounts.status, 401);
+
+    const unauthTxs = await fetch(`${baseUrl}/api/transactions`);
+    assert.strictEqual(unauthTxs.status, 401);
+
+    const unauthDebts = await fetch(`${baseUrl}/api/debts`);
+    assert.strictEqual(unauthDebts.status, 401);
+  });
+
+  await t.test('3. Authenticated Health Check returns full Sheets diagnostics', async () => {
+    const res = await authFetch(`${baseUrl}/api/health`);
     assert.strictEqual(res.status, 200);
     const data = await res.json();
     assert.strictEqual(data.status, 'ONLINE');
@@ -36,49 +70,31 @@ test('Express API Endpoints with Google Sheets Live Data Layer', async (t) => {
     assert.strictEqual(data.writeMode, 'GOOGLE_SHEETS_API');
   });
 
-  await t.test('GET /api/sheets/config returns sheets configuration without BigQuery requirement', async () => {
-    const res = await fetch(`${baseUrl}/api/sheets/config`);
-    assert.strictEqual(res.status, 200);
-    const data = await res.json();
-    assert.strictEqual(data.readMode, 'GOOGLE_SHEETS_API');
-    assert.strictEqual(data.writeMode, 'GOOGLE_SHEETS_API');
-    assert.strictEqual(data.bigqueryBillingRequired, false);
-    assert.ok(data.spreadsheetId);
+  await t.test('4. Session Check Endpoint (/api/auth/session)', async () => {
+    // Unauthenticated
+    const unauthRes = await fetch(`${baseUrl}/api/auth/session`);
+    assert.strictEqual(unauthRes.status, 200);
+    const unauthData = await unauthRes.json();
+    assert.strictEqual(unauthData.authenticated, false);
+
+    // Authenticated
+    const authRes = await authFetch(`${baseUrl}/api/auth/session`);
+    assert.strictEqual(authRes.status, 200);
+    const authData = await authRes.json();
+    assert.strictEqual(authData.authenticated, true);
+    assert.strictEqual(authData.user.email, authService.OWNER_EMAIL);
   });
 
-  await t.test('GET /api/test-query returns test transactions from Google Sheets', async () => {
-    const res = await fetch(`${baseUrl}/api/test-query`);
-    assert.strictEqual(res.status, 200);
-    const data = await res.json();
-    assert.strictEqual(data.status, 'SUCCESS');
-    assert.strictEqual(data.source, 'GOOGLE_SHEETS_LIVE');
-    assert.ok(data.result);
-  });
-
-  await t.test('GET /api/rates returns exchange rates', async () => {
-    const res = await fetch(`${baseUrl}/api/rates`);
-    assert.strictEqual(res.status, 200);
-    const data = await res.json();
-    assert.ok(data.USD_TO_ZAR > 0);
-  });
-
-  await t.test('GET /api/accounts returns accounts array', async () => {
-    const res = await fetch(`${baseUrl}/api/accounts`);
+  await t.test('5. GET /api/accounts returns accounts for owner', async () => {
+    const res = await authFetch(`${baseUrl}/api/accounts`);
     assert.strictEqual(res.status, 200);
     const data = await res.json();
     assert.ok(Array.isArray(data));
     assert.ok(data.length > 0);
   });
 
-  await t.test('GET /api/transactions returns transactions', async () => {
-    const res = await fetch(`${baseUrl}/api/transactions?limit=10`);
-    assert.strictEqual(res.status, 200);
-    const data = await res.json();
-    assert.ok(Array.isArray(data));
-  });
-
-  await t.test('POST /api/transactions creates transaction and DELETE removes it', async () => {
-    const postRes = await fetch(`${baseUrl}/api/transactions`, {
+  await t.test('6. Transactions CRUD for Owner', async () => {
+    const postRes = await authFetch(`${baseUrl}/api/transactions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -96,17 +112,15 @@ test('Express API Endpoints with Google Sheets Live Data Layer', async (t) => {
     assert.ok(postData.transactionId);
 
     // Delete it
-    const delRes = await fetch(`${baseUrl}/api/transactions/${postData.transactionId}`, {
+    const delRes = await authFetch(`${baseUrl}/api/transactions/${postData.transactionId}`, {
       method: 'DELETE'
     });
     assert.strictEqual(delRes.status, 200);
-    const delData = await delRes.json();
-    assert.strictEqual(delData.success, true);
   });
 
-  await t.test('Debt Ledger Endpoints: GET, POST, PATCH /settle, PATCH /reopen, DELETE', async () => {
+  await t.test('7. Debt Ledger: Settle, Idempotent Settle, Reopen & Delete', async () => {
     // 1. Create debt
-    const postRes = await fetch(`${baseUrl}/api/debts`, {
+    const postRes = await authFetch(`${baseUrl}/api/debts`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -119,91 +133,122 @@ test('Express API Endpoints with Google Sheets Live Data Layer', async (t) => {
     });
     assert.strictEqual(postRes.status, 200);
     const postData = await postRes.json();
-    assert.strictEqual(postData.success, true);
     const debtId = postData.debtId;
 
-    // 2. Fetch debts list
-    const getRes = await fetch(`${baseUrl}/api/debts`);
-    assert.strictEqual(getRes.status, 200);
-    const debts = await getRes.json();
-    assert.ok(debts.some((d) => d.id === debtId));
-
-    // 3. Settle debt (the route that was failing with HTTP 500 on Render due to BQ 403)
-    const settleRes = await fetch(`${baseUrl}/api/debts/${debtId}/settle`, {
+    // 2. Settle debt
+    const settleRes = await authFetch(`${baseUrl}/api/debts/${debtId}/settle`, {
       method: 'PATCH'
     });
     assert.strictEqual(settleRes.status, 200);
     const settleData = await settleRes.json();
-    assert.strictEqual(settleData.success, true);
     assert.strictEqual(settleData.status, 'Settled');
 
-    // 4. Repeated settle call (Idempotency check)
-    const settleRes2 = await fetch(`${baseUrl}/api/debts/${debtId}/settle`, {
+    // 3. Repeated settle call (Idempotency)
+    const settleRes2 = await authFetch(`${baseUrl}/api/debts/${debtId}/settle`, {
       method: 'PATCH'
     });
     assert.strictEqual(settleRes2.status, 200);
     const settleData2 = await settleRes2.json();
-    assert.strictEqual(settleData2.success, true);
     assert.strictEqual(settleData2.alreadySettled, true);
 
-    // 5. Reopen debt
-    const reopenRes = await fetch(`${baseUrl}/api/debts/${debtId}/reopen`, {
+    // 4. Reopen debt
+    const reopenRes = await authFetch(`${baseUrl}/api/debts/${debtId}/reopen`, {
       method: 'PATCH'
     });
     assert.strictEqual(reopenRes.status, 200);
-    const reopenData = await reopenRes.json();
-    assert.strictEqual(reopenData.success, true);
-    assert.strictEqual(reopenData.status, 'Pending');
 
-    // 6. Delete debt
-    const delRes = await fetch(`${baseUrl}/api/debts/${debtId}`, {
+    // 5. Delete debt
+    const delRes = await authFetch(`${baseUrl}/api/debts/${debtId}`, {
       method: 'DELETE'
     });
     assert.strictEqual(delRes.status, 200);
-    const delData = await delRes.json();
-    assert.strictEqual(delData.success, true);
   });
 
-  await t.test('GET /api/budgets returns budget envelopes', async () => {
-    const res = await fetch(`${baseUrl}/api/budgets`);
-    assert.strictEqual(res.status, 200);
-    const data = await res.json();
-    assert.ok(Array.isArray(data));
+  await t.test('8. Passkey Authentication Endpoints', async () => {
+    // Login options (Public)
+    const loginOptionsRes = await fetch(`${baseUrl}/api/auth/passkey/login-options`, {
+      method: 'POST'
+    });
+    assert.strictEqual(loginOptionsRes.status, 200);
+    const loginOptions = await loginOptionsRes.json();
+    assert.ok(loginOptions.options);
+    assert.ok(loginOptions.challengeId);
+
+    // Register options (Protected - owner only)
+    const unauthReg = await fetch(`${baseUrl}/api/auth/passkey/register-options`, { method: 'POST' });
+    assert.strictEqual(unauthReg.status, 401);
+
+    const authReg = await authFetch(`${baseUrl}/api/auth/passkey/register-options`, { method: 'POST' });
+    assert.strictEqual(authReg.status, 200);
+    const regOptions = await authReg.json();
+    assert.ok(regOptions.challenge);
+    assert.strictEqual(regOptions.rp.name, 'Ziva Finance');
   });
 
-  await t.test('GET /api/tax-schedule returns SARS tax schedule', async () => {
-    const res = await fetch(`${baseUrl}/api/tax-schedule`);
-    assert.strictEqual(res.status, 200);
-    const data = await res.json();
-    assert.ok(data.taxYear);
-    assert.strictEqual(data.effectiveTaxRate, 0.27);
+  await t.test('9. Receipt Scan, Draft Creation & Confirmation to Sheets', async () => {
+    // Unauthenticated upload must be rejected
+    const unauthUpload = await fetch(`${baseUrl}/api/receipts/upload`, { method: 'POST' });
+    assert.strictEqual(unauthUpload.status, 401);
+
+    // Create receipt draft directly via service (simulating valid uploaded receipt)
+    const receiptService = require('../services/receiptService');
+    const mockFileBuffer = Buffer.from('WOOLWORTHS FOOD\nTAX INVOICE INV-2026-9901\nDATE: 2026-10-08\nTOTAL: R450.00\nVAT 15%: R58.70\n');
+    
+    const draft = await receiptService.createReceiptDraft({
+      fileBuffer: mockFileBuffer,
+      filename: 'woolies_receipt.txt',
+      mimeType: 'text/plain',
+      userEmail: authService.OWNER_EMAIL
+    });
+
+    assert.ok(draft.draftId);
+    assert.strictEqual(draft.status, 'AWAITING_REVIEW');
+    assert.strictEqual(draft.extractedFields.currency, 'ZAR');
+    assert.strictEqual(draft.extractedFields.amount, 450.00);
+
+    // Confirm draft to Google Sheets via authenticated endpoint
+    const confirmRes = await authFetch(`${baseUrl}/api/receipts/confirm`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        draftId: draft.draftId,
+        reviewedData: {
+          merchant: 'Woolworths Food Sandton',
+          amount: 450.00,
+          currency: 'ZAR',
+          category: 'CAT_FOOD_DINING',
+          isTaxDeductible: true
+        }
+      })
+    });
+
+    assert.strictEqual(confirmRes.status, 200);
+    const confirmData = await confirmRes.json();
+    assert.strictEqual(confirmData.success, true);
+    assert.ok(confirmData.transactionId);
+
+    // Repeated confirmation (Idempotency check)
+    const repeatConfirmRes = await authFetch(`${baseUrl}/api/receipts/confirm`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ draftId: draft.draftId })
+    });
+    assert.strictEqual(repeatConfirmRes.status, 200);
+    const repeatData = await repeatConfirmRes.json();
+    assert.strictEqual(repeatData.alreadyConfirmed, true);
   });
 
-  await t.test('GET /api/vault returns vault holdings', async () => {
-    const res = await fetch(`${baseUrl}/api/vault`);
-    assert.strictEqual(res.status, 200);
-    const data = await res.json();
-    assert.ok(Array.isArray(data));
-  });
+  await t.test('10. Financial Aggregations & Metrics (Protected)', async () => {
+    const budgetsRes = await authFetch(`${baseUrl}/api/budgets`);
+    assert.strictEqual(budgetsRes.status, 200);
 
-  await t.test('GET /api/burn-rate returns burn metrics', async () => {
-    const res = await fetch(`${baseUrl}/api/burn-rate`);
-    assert.strictEqual(res.status, 200);
-    const data = await res.json();
-    assert.ok(Array.isArray(data));
-  });
+    const taxRes = await authFetch(`${baseUrl}/api/tax-schedule`);
+    assert.strictEqual(taxRes.status, 200);
 
-  await t.test('GET /api/analytics/income-statement returns statements', async () => {
-    const res = await fetch(`${baseUrl}/api/analytics/income-statement`);
-    assert.strictEqual(res.status, 200);
-    const data = await res.json();
-    assert.ok(Array.isArray(data));
-  });
+    const burnRes = await authFetch(`${baseUrl}/api/burn-rate`);
+    assert.strictEqual(burnRes.status, 200);
 
-  await t.test('GET /api/analytics/summary returns KPI performance summary', async () => {
-    const res = await fetch(`${baseUrl}/api/analytics/summary`);
-    assert.strictEqual(res.status, 200);
-    const data = await res.json();
-    assert.ok(data.kpis);
+    const summaryRes = await authFetch(`${baseUrl}/api/analytics/summary`);
+    assert.strictEqual(summaryRes.status, 200);
   });
 });

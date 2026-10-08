@@ -6,7 +6,8 @@ import {
   MasterCurrency,
   ExchangeRates,
   PredictiveBurnMetrics,
-  TaxQuarterSchedule
+  TaxQuarterSchedule,
+  InvestmentCounter
 } from '../../types/finance';
 import { convertCurrency } from '../../services/currency';
 import {
@@ -27,15 +28,16 @@ import { LiveAccountsNotice } from '../accounts/LiveAccountsNotice';
 
 interface DashboardViewProps {
   accounts: Account[];
-  /** True when the top bar shows "BigQuery Live". */
+  /** True when the top bar shows "Google Sheets Live". */
   isLive?: boolean;
   liveAccounts?: LiveAccountsState;
   envelopes: BudgetEnvelope[];
   transactions: Transaction[];
   masterCurrency: MasterCurrency;
   rates: ExchangeRates;
-  burnMetrics: PredictiveBurnMetrics;
-  taxSchedule: TaxQuarterSchedule;
+  burnMetrics: PredictiveBurnMetrics | null;
+  taxSchedule: TaxQuarterSchedule | null;
+  investments?: InvestmentCounter[];
   onNavigate: (tab: NavTab) => void;
   onOpenCopilot: () => void;
 }
@@ -50,6 +52,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   rates,
   burnMetrics,
   taxSchedule,
+  investments,
   onNavigate,
   onOpenCopilot
 }) => {
@@ -94,7 +97,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         <div className="hero-content">
           <div className="hero-caption">
             <span className="badge badge-gold">CONSOLIDATED NET WORTH</span>
-            <span className="hero-time">Real-Time BigQuery Partition Valuation</span>
+            <span className="hero-time">Real-Time Live Sheet Valuation</span>
           </div>
           <h1 className="hero-amount mono">
             {fmt(totalNetWorthMaster)}
@@ -133,7 +136,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       </section>
 
       {/* 2. Gemini AI Financial Intelligence Briefing */}
-      <CopilotBriefingCard onOpenCopilot={onOpenCopilot} masterCurrency={masterCurrency} />
+      <CopilotBriefingCard onOpenCopilot={onOpenCopilot} masterCurrency={masterCurrency} isLive={isLive} />
 
       {/* 3. Wealth Management Suite Snapshot Tiles */}
       <section className="wealth-tiles-row">
@@ -147,10 +150,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
           <div className="tile-title">Predictive Burn</div>
           <div className="tile-metric mono text-rose">
-            {burnMetrics.baselineRunwayDays} <span className="metric-unit">Days</span>
+            {burnMetrics ? `${burnMetrics.baselineRunwayDays} ` : '— '}
+            {burnMetrics && <span className="metric-unit">Days</span>}
           </div>
           <div className="tile-footer">
-            <span>Burn: R{burnMetrics.averageDailyBurnZar.toLocaleString()}/day</span>
+            <span>
+              {burnMetrics
+                ? `Burn: R${burnMetrics.averageDailyBurnZar.toLocaleString()}/day`
+                : 'Awaiting spend history'}
+            </span>
             <ChevronRight size={14} />
           </div>
         </div>
@@ -165,10 +173,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
           <div className="tile-title">Tax Shield Offsets</div>
           <div className="tile-metric mono text-emerald">
-            R {taxSchedule.productivityExpensesOffsetZar.toLocaleString()}
+            {taxSchedule ? `R ${taxSchedule.productivityExpensesOffsetZar.toLocaleString()}` : '—'}
           </div>
           <div className="tile-footer">
-            <span>+R4,500 pending write-off</span>
+            <span>
+              {taxSchedule
+                ? (taxSchedule.productivityExpensesOffsetZar > 0 ? 'Qualifying Deductions' : 'No deductions logged')
+                : 'Awaiting tax records'}
+            </span>
             <ChevronRight size={14} />
           </div>
         </div>
@@ -183,7 +195,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
           <div className="tile-title">Currency Arbitrage</div>
           <div className="tile-metric mono text-cyan">
-            +76.9% <span className="metric-unit">ZiG Spread</span>
+            +{rates.USD_TO_ZIG_OFFICIAL > 0 ? (((rates.USD_TO_ZIG_PARALLEL - rates.USD_TO_ZIG_OFFICIAL) / rates.USD_TO_ZIG_OFFICIAL) * 100).toFixed(1) : '0.0'}% <span className="metric-unit">ZiG Spread</span>
           </div>
           <div className="tile-footer">
             <span>Action: Settle via ZiG Swipe</span>
@@ -201,10 +213,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
           <div className="tile-title">Investment Hub</div>
           <div className="tile-metric mono text-purple">
-            6 <span className="metric-unit">Holdings</span>
+            {investments ? investments.length : (isLive ? 0 : 6)} <span className="metric-unit">Holdings</span>
           </div>
           <div className="tile-footer">
-            <span>VFEX (USD) & JSE (ZAR)</span>
+            <span>
+              {isLive
+                ? (investments && investments.length > 0 ? 'Live Tracked Holdings' : 'Vault Not Configured')
+                : 'Demo: VFEX (USD) & JSE (ZAR)'}
+            </span>
             <ChevronRight size={14} />
           </div>
         </div>
@@ -216,7 +232,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div>
             <h3>Monthly Zero-Based Budget Health (Current Month)</h3>
             <p className="section-subtitle">
-              Sourced directly from BigQuery view <code className="mono">v_monthly_budget_vs_actual</code>
+              Sourced directly from live budget allocations in Google Sheets
             </p>
           </div>
           <button className="btn btn-ghost" onClick={() => onNavigate('budgets')}>
@@ -224,41 +240,53 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </button>
         </div>
 
-        {/* Visual Progress Bar */}
-        <div className="budget-meter-container">
-          <div className="budget-meter-header">
-            <span className="meter-label">
-              Spent: <strong className="mono">{spentMaster.formatted}</strong> of{' '}
-              <strong className="mono">{plannedMaster.formatted}</strong>
-            </span>
-            <span className="badge badge-emerald">🟢 ON TRACK ({budgetPct}% CONSUMED)</span>
+        {envelopes.length === 0 ? (
+          <div style={{ padding: '2rem 1rem', textAlign: 'center' }}>
+            <p className="text-muted" style={{ margin: 0 }}>
+              {isLive
+                ? 'No live budget envelopes configured in Google Sheets.'
+                : 'No budget envelopes defined.'}
+            </p>
           </div>
-          <div className="meter-track">
-            <div className="meter-fill bg-emerald" style={{ width: `${budgetPct}%` }} />
-          </div>
-        </div>
-
-        {/* Envelope Mini-Grid */}
-        <div className="envelope-mini-grid">
-          {envelopes.slice(0, 4).map((env) => {
-            const spentConv = convertCurrency(env.actualSpentZar, 'ZAR', masterCurrency, rates);
-            const plannedConv = convertCurrency(env.plannedAmountZar, 'ZAR', masterCurrency, rates);
-            return (
-              <div key={env.categoryId} className="envelope-mini-card">
-                <div className="env-card-title">{env.categoryName}</div>
-                <div className="env-card-amount mono">
-                  {spentConv.formatted} / {plannedConv.formatted}
-                </div>
-                <div className="env-card-bar">
-                  <div
-                    className={`env-bar-fill ${env.budgetStatus === 'OVER_BUDGET' ? 'bg-rose' : 'bg-gold'}`}
-                    style={{ width: `${Math.min(100, env.pctConsumed)}%` }}
-                  />
-                </div>
+        ) : (
+          <>
+            {/* Visual Progress Bar */}
+            <div className="budget-meter-container">
+              <div className="budget-meter-header">
+                <span className="meter-label">
+                  Spent: <strong className="mono">{spentMaster.formatted}</strong> of{' '}
+                  <strong className="mono">{plannedMaster.formatted}</strong>
+                </span>
+                <span className="badge badge-emerald">🟢 ON TRACK ({budgetPct}% CONSUMED)</span>
               </div>
-            );
-          })}
-        </div>
+              <div className="meter-track">
+                <div className="meter-fill bg-emerald" style={{ width: `${budgetPct}%` }} />
+              </div>
+            </div>
+
+            {/* Envelope Mini-Grid */}
+            <div className="envelope-mini-grid">
+              {envelopes.slice(0, 4).map((env) => {
+                const spentConv = convertCurrency(env.actualSpentZar, 'ZAR', masterCurrency, rates);
+                const plannedConv = convertCurrency(env.plannedAmountZar, 'ZAR', masterCurrency, rates);
+                return (
+                  <div key={env.categoryId} className="envelope-mini-card">
+                    <div className="env-card-title">{env.categoryName}</div>
+                    <div className="env-card-amount mono">
+                      {spentConv.formatted} / {plannedConv.formatted}
+                    </div>
+                    <div className="env-card-bar">
+                      <div
+                        className={`env-bar-fill ${env.budgetStatus === 'OVER_BUDGET' ? 'bg-rose' : 'bg-gold'}`}
+                        style={{ width: `${Math.min(100, env.pctConsumed)}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
       </section>
 
       {/* 4. Recent Transactions Preview */}
@@ -266,51 +294,59 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         <div className="section-title-bar">
           <div>
             <h3>Recent Financial Movements</h3>
-            <p className="section-subtitle">Real-time ledger events partitioned by date in BigQuery</p>
+            <p className="section-subtitle">Real-time ledger events recorded in Google Sheets</p>
           </div>
           <button className="btn btn-ghost" onClick={() => onNavigate('ledger')}>
             View Full Ledger <ChevronRight size={14} />
           </button>
         </div>
 
-        <div className="tx-list">
-          {transactions.slice(0, 5).map((tx) => {
-            const isIncome = tx.transactionType === 'INCOME';
-            const conv = convertCurrency(tx.originalAmount, tx.originalCurrency, masterCurrency, rates);
-            return (
-              <div key={tx.transactionId} className="tx-item">
-                <div className="tx-left">
-                  <div className={`tx-icon-bubble ${isIncome ? 'income' : 'expense'}`}>
-                    {isIncome ? <ArrowDownLeft size={16} /> : <ArrowUpRight size={16} />}
+        {transactions.length === 0 ? (
+          <div style={{ padding: '2rem 1rem', textAlign: 'center' }}>
+            <p className="text-muted" style={{ margin: 0 }}>
+              {isLive ? 'No live transactions recorded in Google Sheets yet.' : 'No transactions recorded yet.'}
+            </p>
+          </div>
+        ) : (
+          <div className="tx-list">
+            {transactions.slice(0, 5).map((tx) => {
+              const isIncome = tx.transactionType === 'INCOME';
+              const conv = convertCurrency(tx.originalAmount, tx.originalCurrency, masterCurrency, rates);
+              return (
+                <div key={tx.transactionId} className="tx-item">
+                  <div className="tx-left">
+                    <div className={`tx-icon-bubble ${isIncome ? 'income' : 'expense'}`}>
+                      {isIncome ? <ArrowDownLeft size={16} /> : <ArrowUpRight size={16} />}
+                    </div>
+                    <div>
+                      <div className="tx-payee">{tx.merchantOrPayee}</div>
+                      <div className="tx-meta">
+                        <span>{tx.transactionDate}</span>
+                        <span>•</span>
+                        <span>{tx.categoryName}</span>
+                        {tx.isTaxDeductible && (
+                          <span className="badge badge-gold badge-compact">💼 Tax Deductible</span>
+                        )}
+                        {tx.taxInvoiceNumber && (
+                          <span className="badge badge-purple badge-compact">🧾 {tx.taxInvoiceNumber}</span>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <div className="tx-payee">{tx.merchantOrPayee}</div>
-                    <div className="tx-meta">
-                      <span>{tx.transactionDate}</span>
-                      <span>•</span>
-                      <span>{tx.categoryName}</span>
-                      {tx.isTaxDeductible && (
-                        <span className="badge badge-gold badge-compact">💼 Tax Deductible</span>
-                      )}
-                      {tx.taxInvoiceNumber && (
-                        <span className="badge badge-purple badge-compact">🧾 {tx.taxInvoiceNumber}</span>
-                      )}
+
+                  <div className="tx-right text-right">
+                    <div className={`tx-amount mono ${isIncome ? 'text-emerald' : 'text-primary'}`}>
+                      {isIncome ? '+' : ''}{conv.formatted}
+                    </div>
+                    <div className="tx-native-hint mono text-muted">
+                      {tx.originalCurrency} {Math.abs(tx.originalAmount).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                     </div>
                   </div>
                 </div>
-
-                <div className="tx-right text-right">
-                  <div className={`tx-amount mono ${isIncome ? 'text-emerald' : 'text-primary'}`}>
-                    {isIncome ? '+' : ''}{conv.formatted}
-                  </div>
-                  <div className="tx-native-hint mono text-muted">
-                    {tx.originalCurrency} {Math.abs(tx.originalAmount).toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        )}
       </section>
     </div>
   );

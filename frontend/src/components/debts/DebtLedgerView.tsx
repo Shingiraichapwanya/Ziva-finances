@@ -8,15 +8,19 @@ import {
   Clock,
   Search,
   RefreshCw,
-  DollarSign
+  DollarSign,
+  RotateCcw,
+  Trash2
 } from 'lucide-react';
 import { DebtRecord, DebtBalance, MasterCurrency, CurrencyCode, ExchangeRates } from '../../types/finance';
 import { financeApi } from '../../services/api';
 import { convertCurrency, getCurrencySymbol, DEFAULT_RATES } from '../../services/currency';
+import { INITIAL_DEMO_DEBTS, INITIAL_DEMO_DEBT_BALANCES } from '../../services/mockData';
 
 interface DebtLedgerViewProps {
   masterCurrency: MasterCurrency;
   rates?: ExchangeRates;
+  isLive?: boolean;
 }
 
 function normalizeCurrency(raw: string = 'USD'): CurrencyCode {
@@ -71,7 +75,7 @@ function tryConvertAmount(
   }
 }
 
-export const DebtLedgerView: React.FC<DebtLedgerViewProps> = ({ masterCurrency, rates = DEFAULT_RATES }) => {
+export const DebtLedgerView: React.FC<DebtLedgerViewProps> = ({ masterCurrency, rates = DEFAULT_RATES, isLive = false }) => {
   const [debts, setDebts] = useState<DebtRecord[]>([]);
   const [balances, setBalances] = useState<DebtBalance[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -94,6 +98,13 @@ export const DebtLedgerView: React.FC<DebtLedgerViewProps> = ({ masterCurrency, 
 
   const loadData = async () => {
     setIsLoading(true);
+    if (!isLive) {
+      // Demo Mode: strictly isolated mock state, zero live financial API calls
+      setDebts(INITIAL_DEMO_DEBTS);
+      setBalances(INITIAL_DEMO_DEBT_BALANCES);
+      setIsLoading(false);
+      return;
+    }
     try {
       const [debtsData, balancesData] = await Promise.all([
         financeApi.getDebts(),
@@ -110,9 +121,15 @@ export const DebtLedgerView: React.FC<DebtLedgerViewProps> = ({ masterCurrency, 
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [isLive]);
 
   const handleSettle = async (id: string) => {
+    if (!isLive) {
+      setDebts((prev) =>
+        prev.map((d) => (d.id === id ? { ...d, status: 'Settled', updatedAt: new Date().toISOString() } : d))
+      );
+      return;
+    }
     try {
       await financeApi.settleDebt(id);
       await loadData();
@@ -121,11 +138,62 @@ export const DebtLedgerView: React.FC<DebtLedgerViewProps> = ({ masterCurrency, 
     }
   };
 
+  const handleReopen = async (id: string) => {
+    if (!isLive) {
+      setDebts((prev) =>
+        prev.map((d) => (d.id === id ? { ...d, status: 'Pending', updatedAt: new Date().toISOString() } : d))
+      );
+      return;
+    }
+    try {
+      await financeApi.reopenDebt(id);
+      await loadData();
+    } catch (err) {
+      console.error('Failed to reopen debt:', err);
+    }
+  };
+
+  const handleDelete = async (debt: DebtRecord) => {
+    const confirmed = window.confirm(`Are you sure you want to delete the debt record for "${debt.personName}" (${debt.currency} ${debt.amount})?`);
+    if (!confirmed) return;
+    if (!isLive) {
+      setDebts((prev) => prev.filter((d) => d.id !== debt.id));
+      return;
+    }
+    try {
+      await financeApi.deleteDebt(debt.id);
+      await loadData();
+    } catch (err) {
+      console.error('Failed to delete debt:', err);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formPerson || !formAmount || isNaN(Number(formAmount))) return;
 
     setIsSubmitting(true);
+    if (!isLive) {
+      const newDebt: DebtRecord = {
+        id: `DEBT-DEMO-${Date.now()}`,
+        personName: formPerson.trim(),
+        direction: formDirection,
+        amount: parseFloat(formAmount),
+        currency: formCurrency,
+        date: formDate,
+        status: 'Pending',
+        notes: formNotes.trim(),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      setDebts((prev) => [newDebt, ...prev]);
+      setIsModalOpen(false);
+      setFormPerson('');
+      setFormAmount('');
+      setFormNotes('');
+      setIsSubmitting(false);
+      return;
+    }
     try {
       await financeApi.createDebt({
         personName: formPerson.trim(),
@@ -229,7 +297,7 @@ export const DebtLedgerView: React.FC<DebtLedgerViewProps> = ({ masterCurrency, 
             Debt & Credit Ledger
           </h1>
           <p style={{ color: '#94A3B8', fontSize: '13px', margin: '4px 0 0 0' }}>
-            Peer-to-peer loans, shared expenses, and net balances powered by BigQuery
+            Peer-to-peer loans, shared expenses, and net balances powered by Google Sheets Live
           </p>
         </div>
         <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
@@ -543,24 +611,67 @@ export const DebtLedgerView: React.FC<DebtLedgerViewProps> = ({ masterCurrency, 
                       </span>
                     </td>
                     <td style={{ padding: '12px', textAlign: 'right' }}>
-                      {d.status === 'Pending' && (
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '6px' }}>
+                        {d.status === 'Pending' ? (
+                          <button
+                            type="button"
+                            onClick={() => handleSettle(d.id)}
+                            style={{
+                              padding: '4px 10px',
+                              fontSize: '11px',
+                              fontWeight: 600,
+                              borderRadius: '4px',
+                              background: 'rgba(16,185,129,0.15)',
+                              color: '#10B981',
+                              border: '1px solid rgba(16,185,129,0.3)',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            Mark Settled
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleReopen(d.id)}
+                            title="Reopen / Undo Settle"
+                            style={{
+                              padding: '4px 10px',
+                              fontSize: '11px',
+                              fontWeight: 600,
+                              borderRadius: '4px',
+                              background: 'rgba(59,130,246,0.15)',
+                              color: '#60A5FA',
+                              border: '1px solid rgba(59,130,246,0.3)',
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px'
+                            }}
+                          >
+                            <RotateCcw size={11} />
+                            Reopen
+                          </button>
+                        )}
                         <button
                           type="button"
-                          onClick={() => handleSettle(d.id)}
+                          onClick={() => handleDelete(d)}
+                          title={`Delete record for ${d.personName}`}
                           style={{
-                            padding: '4px 10px',
+                            padding: '4px 8px',
                             fontSize: '11px',
                             fontWeight: 600,
                             borderRadius: '4px',
-                            background: 'rgba(16,185,129,0.15)',
-                            color: '#10B981',
-                            border: '1px solid rgba(16,185,129,0.3)',
-                            cursor: 'pointer'
+                            background: 'rgba(239,68,68,0.15)',
+                            color: '#F87171',
+                            border: '1px solid rgba(239,68,68,0.3)',
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center'
                           }}
                         >
-                          Mark Settled
+                          <Trash2 size={12} />
                         </button>
-                      )}
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -785,7 +896,7 @@ export const DebtLedgerView: React.FC<DebtLedgerViewProps> = ({ masterCurrency, 
                     cursor: 'pointer'
                   }}
                 >
-                  {isSubmitting ? 'Saving to BigQuery...' : 'Save Entry'}
+                  {isSubmitting ? 'Saving to Google Sheets...' : 'Save Entry'}
                 </button>
               </div>
             </form>

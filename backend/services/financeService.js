@@ -23,32 +23,17 @@ async function getMonthlyBurnMetrics(months = 6) {
   }));
 }
 
+async function getBurnRateSummary(days = 14) {
+  return sheetsRepo.getBurnRateSummary(days);
+}
+
 async function getRunwayProjection() {
-  const accounts = await sheetsRepo.getAccounts();
-  const burnMetrics = await sheetsRepo.getDailyBurnMetrics(14);
-  const envelopes = await sheetsRepo.getBudgetEnvelopes();
-
-  let liquidReserveZar = 0;
-  accounts.forEach((a) => {
-    if (a.cashFlowTier === 'DAILY_SPENDING' || a.cashFlowTier === 'MONTHLY_ALLOCATION') {
-      liquidReserveZar += Number(a.reportingAmountZar || a.nativeBalance || 0);
-    }
-  });
-
-  let avgDailyBurn = 650;
-  if (burnMetrics.length > 0) {
-    const sum = burnMetrics.reduce((s, b) => s + (Number(b.dailySpendZar) || 0), 0);
-    avgDailyBurn = Math.max(100, sum / burnMetrics.length);
-  }
-
-  const baselineRunwayDays = Math.max(0, Math.floor(liquidReserveZar / avgDailyBurn));
-  const survivalDate = new Date(Date.now() + baselineRunwayDays * 86400000).toISOString().split('T')[0];
-
+  const summary = await sheetsRepo.getBurnRateSummary(14);
   return {
-    liquidReserveZar,
-    avgDailyBurnZar: Math.round(avgDailyBurn),
-    baselineRunwayDays,
-    survivalDate
+    liquidReserveZar: summary.metrics.liquidReserveBalanceZar,
+    avgDailyBurnZar: summary.metrics.averageDailyBurnZar,
+    baselineRunwayDays: summary.metrics.baselineRunwayDays,
+    survivalDate: summary.metrics.survivalDate
   };
 }
 
@@ -106,6 +91,7 @@ async function runQuery(sql, params = {}) {
 
 const financeService = {
   getDailyBurnMetrics,
+  getBurnRateSummary,
   getMonthlyBurnMetrics,
   getRunwayProjection,
   getMonthlySpendingTrends,

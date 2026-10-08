@@ -7,10 +7,11 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "test": "node --no-warnings --experimental-strip-types --test src/services/liveData.test.ts",
+    "test": "node --no-warnings --experimental-strip-types --test src/services/*.test.ts",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@simplewebauthn/browser": "^14.0.0",
     "lucide-react": "^1.41.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"

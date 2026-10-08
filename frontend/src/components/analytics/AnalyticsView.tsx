@@ -29,15 +29,18 @@ import {
   CheckCircle2,
   AlertCircle
 } from 'lucide-react';
+import { INITIAL_DEMO_PERFORMANCE_SUMMARY } from '../../services/mockData';
 
 interface AnalyticsViewProps {
   masterCurrency: MasterCurrency;
   rates: ExchangeRates;
+  isLive?: boolean;
 }
 
 export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
   masterCurrency,
-  rates
+  rates,
+  isLive = false
 }) => {
   const [summary, setSummary] = useState<PerformanceSummary | null>(null);
   const [periodType, setPeriodType] = useState<'MONTH' | 'QUARTER'>('MONTH');
@@ -50,11 +53,17 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
     try {
       setLoading(true);
       setError(null);
+      if (!isLive) {
+        // Demo Mode: strictly use isolated demo fixtures, zero live API calls
+        setSummary(INITIAL_DEMO_PERFORMANCE_SUMMARY);
+        setLoading(false);
+        return;
+      }
       const data = await api.getPerformanceSummary();
       setSummary(data);
     } catch (err: any) {
       console.error('Failed to load performance analytics:', err);
-      setError(err.message || 'Error fetching analytics from BigQuery');
+      setError(err.message || 'Error fetching analytics from Google Sheets backend');
     } finally {
       setLoading(false);
     }
@@ -62,7 +71,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
 
   useEffect(() => {
     fetchSummary();
-  }, []);
+  }, [isLive]);
 
   // Filter statements by periodType (MONTH vs QUARTER)
   const filteredStatements = useMemo(() => {
@@ -113,38 +122,19 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
     return summary.spendHabits.filter((h) => h.categoryGroup === selectedGroupFilter);
   }, [summary?.spendHabits, selectedGroupFilter]);
 
-  // SVG Trend Chart Data Calculations
+  // SVG Trend Chart Data Calculations (grounded only in recorded months)
   const trendData = useMemo(() => {
     if (!summary?.monthlyTrends || summary.monthlyTrends.length === 0) {
-      // Fallback synthetic baseline trend if only 1 month ingested
-      if (summary?.statements && summary.statements.length === 1) {
-        const s = summary.statements[0];
-        return [
-          {
-            statementPeriod: '2026-07',
-            periodStartDate: '2026-07-01',
-            operatingRevenueZar: s.grossOperatingRevenueZar * 0.92,
-            totalOutflowsZar: s.totalComprehensiveOutflowsZar * 0.88,
-            netSurplusZar: s.grossOperatingRevenueZar * 0.92 - s.totalComprehensiveOutflowsZar * 0.88,
-            savingsRatePct: 4.2
-          },
-          {
-            statementPeriod: '2026-08',
-            periodStartDate: '2026-08-01',
-            operatingRevenueZar: s.grossOperatingRevenueZar * 0.96,
-            totalOutflowsZar: s.totalComprehensiveOutflowsZar * 0.94,
-            netSurplusZar: s.grossOperatingRevenueZar * 0.96 - s.totalComprehensiveOutflowsZar * 0.94,
-            savingsRatePct: 2.1
-          },
-          {
-            statementPeriod: s.statementPeriod,
-            periodStartDate: s.periodStartDate,
-            operatingRevenueZar: s.grossOperatingRevenueZar,
-            totalOutflowsZar: s.totalComprehensiveOutflowsZar,
-            netSurplusZar: s.netCashSurplusZar,
-            savingsRatePct: s.savingsRatePct
-          }
-        ];
+      if (summary?.statements && summary.statements.length > 0) {
+        // Convert only actual recorded statements to trend points without fabricating synthetic prior months
+        return summary.statements.map((s) => ({
+          statementPeriod: s.statementPeriod,
+          periodStartDate: s.periodStartDate,
+          operatingRevenueZar: s.grossOperatingRevenueZar,
+          totalOutflowsZar: s.totalComprehensiveOutflowsZar,
+          netSurplusZar: s.netCashSurplusZar,
+          savingsRatePct: s.savingsRatePct
+        }));
       }
       return [];
     }
@@ -201,12 +191,12 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
             <BarChart3 size={16} className="text-gold" />
             <span>FINANCIAL INTELLIGENCE ENGINE</span>
             <span className="analytics-live-tag">
-              <span className="wh-dot pulse-live" /> BigQuery Analytical Views
+              <span className="wh-dot pulse-live" /> Google Sheets Live Analytics
             </span>
           </div>
           <h1 className="analytics-title">Performance & Analytics Command</h1>
           <p className="analytics-subtitle">
-            Structured Income Statements, Spend Habits Distribution, and Non-Operating Asset Yields Grounded in BigQuery Views.
+            Structured Income Statements, Spend Habits Distribution, and Non-Operating Asset Yields Grounded in Verified Financial Records.
           </p>
         </div>
 
@@ -236,7 +226,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
             className="analytics-refresh-btn"
             onClick={fetchSummary}
             disabled={loading}
-            title="Refresh BigQuery Analytical Views"
+            title="Refresh Live Financial Analytics"
           >
             <RefreshCw size={15} className={loading ? 'spin-animation' : ''} />
             {loading ? 'Refreshing...' : 'Sync Views'}
@@ -607,7 +597,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
       <div className="analytics-card statement-card">
         <div className="analytics-card-header">
           <div>
-            <div className="card-sub-header">READ-ONLY BIGQUERY ANALYTICAL VIEW</div>
+            <div className="card-sub-header">LIVE FINANCIAL STATEMENT VIEW</div>
             <h2 className="card-primary-title">
               Structured Income Statement ({periodType === 'MONTH' ? 'Monthly' : 'Quarterly'})
             </h2>

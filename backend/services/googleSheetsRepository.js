@@ -800,6 +800,47 @@ function serializeDebtRow(record, headers = SCHEMAS.debt_credit_ledger) {
   return headers.map((h) => (valuesMap[h] !== undefined ? valuesMap[h] : ''));
 }
 
+/**
+ * Format an account object into an ordered array matching dim_accounts headers
+ */
+function serializeAccountRow(record, headers = SCHEMAS.dim_accounts) {
+  const now = new Date().toISOString();
+  const valuesMap = {
+    account_id: record.accountId || record.account_id,
+    account_name: record.accountName || record.account_name,
+    financial_institution: record.financialInstitution || record.financial_institution || '',
+    country_code: (record.countryCode || record.country_code || 'ZA').toUpperCase(),
+    primary_currency: (record.primaryCurrency || record.primary_currency || 'ZAR').toUpperCase(),
+    cash_flow_tier: record.cashFlowTier || record.cash_flow_tier || 'DAILY_SPENDING',
+    account_type: record.accountType || record.account_type || 'CHECKING',
+    is_vault_locked: String(record.isVaultLocked !== undefined ? record.isVaultLocked : (record.is_vault_locked || 'false')),
+    withdrawal_notice_days: parseInt(record.withdrawalNoticeDays || record.withdrawal_notice_days || 0, 10),
+    account_number_masked: record.accountNumberMasked || record.account_number_masked || '...0000',
+    is_active: String(record.isActive !== undefined ? record.isActive : (record.is_active || 'true')),
+    created_at: record.createdAt || record.created_at || now
+  };
+  return headers.map((h) => (valuesMap[h] !== undefined ? valuesMap[h] : ''));
+}
+
+/**
+ * Format a budget allocation object into an ordered array matching fct_budget_allocations headers
+ */
+function serializeBudgetRow(record, headers = SCHEMAS.fct_budget_allocations) {
+  const valuesMap = {
+    allocation_month: record.allocationMonth || record.allocation_month,
+    category_id: record.categoryId || record.category_id,
+    cash_flow_tier: record.cashFlowTier || record.cash_flow_tier || 'DAILY_SPENDING',
+    target_currency: (record.targetCurrency || record.target_currency || 'ZAR').toUpperCase(),
+    planned_amount: parseFloat(Number(record.plannedAmount || record.planned_amount || 0).toFixed(2)),
+    planned_amount_usd: parseFloat(Number(record.plannedAmountUsd || record.planned_amount_usd || 0).toFixed(2)),
+    planned_amount_zar: parseFloat(Number(record.plannedAmountZar || record.planned_amount_zar || 0).toFixed(2)),
+    rollover_from_prior: parseFloat(Number(record.rolloverFromPrior || record.rollover_from_prior || 0).toFixed(2)),
+    is_fixed_obligation: String(record.isFixedObligation !== undefined ? record.isFixedObligation : (record.is_fixed_obligation || 'false')),
+    notes: record.notes || ''
+  };
+  return headers.map((h) => (valuesMap[h] !== undefined ? valuesMap[h] : ''));
+}
+
 // -----------------------------------------------------------------------------
 // 8. Repository Public API Functions
 // -----------------------------------------------------------------------------
@@ -1281,7 +1322,7 @@ async function deleteDebt(debtId) {
  * Fetch accounts with calculated balances derived directly from fct_transactions
  * ZERO hardcoded opening balances. Empty database produces genuine empty array [].
  */
-async function getAccounts() {
+async function getAccounts({ includeArchived = false } = {}) {
   const [accountsSheet, txSheet] = await Promise.all([
     fetchSheetObjects(REPO_CONFIG.accountsTab),
     fetchSheetObjects(REPO_CONFIG.transactionsTab)
@@ -1298,10 +1339,11 @@ async function getAccounts() {
   // If dim_accounts tab has defined accounts, map them
   if (accountsSheet.objects.length > 0) {
     return accountsSheet.objects
-      .filter((a) => String(a.is_active).toLowerCase() !== 'false')
+      .filter((a) => includeArchived || String(a.is_active).toLowerCase() !== 'false')
       .map((a) => {
         const accId = a.account_id;
         const net = txTotals[accId] || 0;
+        const isActive = String(a.is_active).toLowerCase() !== 'false';
         return {
           accountId: accId,
           accountName: a.account_name || accId,
@@ -1314,7 +1356,7 @@ async function getAccounts() {
           withdrawalNoticeDays: parseInt(a.withdrawal_notice_days || 0, 10),
           accountNumberMasked: a.account_number_masked || '',
           nativeBalance: parseFloat(net.toFixed(2)),
-          isActive: true
+          isActive
         };
       });
   }
@@ -1339,6 +1381,155 @@ async function getAccounts() {
     nativeBalance: parseFloat((txTotals[accId] || 0).toFixed(2)),
     isActive: true
   }));
+}
+
+/**
+ * Append a new account to dim_accounts (thread-safe)
+ */
+async function createAccount(accountData) {
+  if (!accountData || !accountData.accountName) {
+    throw new Error('Account name is required');
+  }
+
+  return repositoryMutex.runExclusive(async () => {
+    const tabName = REPO_CONFIG.accountsTab;
+    const { headers, objects } = await fetchSheetObjects(tabName);
+    const activeHeaders = headers.length > 0 ? headers : SCHEMAS.dim_accounts;
+
+    const countryCode = (accountData.countryCode || 'ZA').toUpperCase();
+    const cleanName = (accountData.accountName || '').replace(/[^a-zA-Z0-9]/g, '_').toUpperCase();
+    const accountId = accountData.accountId || `ACC_${countryCode}_${cleanName.slice(0, 15)}_${Date.now().toString().slice(-4)}`;
+
+    if (objects.some((a) => a.account_id === accountId)) {
+      throw new Error(`Account with ID '${accountId}' already exists`);
+    }
+
+    const row = serializeAccountRow({
+      accountId,
+      accountName: accountData.accountName,
+      financialInstitution: accountData.financialInstitution || '',
+      countryCode,
+      primaryCurrency: (accountData.primaryCurrency || 'ZAR').toUpperCase(),
+      cashFlowTier: accountData.cashFlowTier || 'DAILY_SPENDING',
+      accountType: accountData.accountType || 'CHECKING',
+      isVaultLocked: accountData.isVaultLocked ? 'true' : 'false',
+      withdrawalNoticeDays: parseInt(accountData.withdrawalNoticeDays || 0, 10),
+      accountNumberMasked: accountData.accountNumberMasked || '...0000',
+      isActive: 'true',
+      createdAt: new Date().toISOString()
+    }, activeHeaders);
+
+    const endpoint = `${REPO_CONFIG.spreadsheetId}/values/${encodeURIComponent(tabName + '!A1')}:append`;
+    await executeSheetsRequest({
+      method: 'POST',
+      endpoint,
+      params: { valueInputOption: 'USER_ENTERED', insertDataOption: 'INSERT_ROWS' },
+      body: { range: `${tabName}!A1`, majorDimension: 'ROWS', values: [row] }
+    });
+
+    return {
+      success: true,
+      accountId,
+      account: {
+        accountId,
+        accountName: accountData.accountName,
+        financialInstitution: accountData.financialInstitution || '',
+        countryCode,
+        primaryCurrency: (accountData.primaryCurrency || 'ZAR').toUpperCase(),
+        cashFlowTier: accountData.cashFlowTier || 'DAILY_SPENDING',
+        accountType: accountData.accountType || 'CHECKING',
+        isVaultLocked: Boolean(accountData.isVaultLocked),
+        withdrawalNoticeDays: parseInt(accountData.withdrawalNoticeDays || 0, 10),
+        accountNumberMasked: accountData.accountNumberMasked || '...0000',
+        nativeBalance: 0,
+        isActive: true
+      }
+    };
+  });
+}
+
+/**
+ * Update an existing account in dim_accounts
+ */
+async function updateAccount(accountId, updates = {}) {
+  if (!accountId || typeof accountId !== 'string') {
+    throw new Error('Valid account ID is required');
+  }
+  const cleanId = accountId.trim();
+
+  return repositoryMutex.runExclusive(async () => {
+    const tabName = REPO_CONFIG.accountsTab;
+    const { headers, objects } = await fetchSheetObjects(tabName);
+    const target = objects.find((a) => a.account_id === cleanId);
+    if (!target) {
+      throw new Error(`Account '${cleanId}' not found in Google Sheets`);
+    }
+
+    const rowNum = target._sheetRowNumber;
+    const patchableFields = [
+      'account_name',
+      'financial_institution',
+      'cash_flow_tier',
+      'account_type',
+      'is_vault_locked',
+      'withdrawal_notice_days',
+      'account_number_masked'
+    ];
+
+    for (const field of patchableFields) {
+      const camelKey = field.replace(/_([a-z])/g, (_, g) => g.toUpperCase());
+      const val = updates[camelKey] !== undefined ? updates[camelKey] : updates[field];
+      if (val !== undefined) {
+        const colIdx = headers.indexOf(field);
+        if (colIdx !== -1) {
+          const colLetter = colToA1(colIdx);
+          await executeSheetsRequest({
+            method: 'PUT',
+            endpoint: `${REPO_CONFIG.spreadsheetId}/values/${encodeURIComponent(tabName + '!' + colLetter + rowNum)}`,
+            params: { valueInputOption: 'USER_ENTERED' },
+            body: { range: `${tabName}!${colLetter}${rowNum}`, majorDimension: 'ROWS', values: [[String(val)]] }
+          });
+        }
+      }
+    }
+
+    return { success: true, accountId: cleanId, updates };
+  });
+}
+
+/**
+ * Soft-archive an account in dim_accounts (preserves linked transactions)
+ */
+async function archiveAccount(accountId) {
+  if (!accountId || typeof accountId !== 'string') {
+    throw new Error('Valid account ID is required');
+  }
+  const cleanId = accountId.trim();
+
+  return repositoryMutex.runExclusive(async () => {
+    const tabName = REPO_CONFIG.accountsTab;
+    const { headers, objects } = await fetchSheetObjects(tabName);
+    const target = objects.find((a) => a.account_id === cleanId);
+    if (!target) {
+      throw new Error(`Account '${cleanId}' not found in Google Sheets`);
+    }
+
+    const rowNum = target._sheetRowNumber;
+    const activeColIdx = headers.indexOf('is_active');
+    if (activeColIdx === -1) {
+      throw new Error(`Column 'is_active' not found in headers of tab '${tabName}'`);
+    }
+
+    const colLetter = colToA1(activeColIdx);
+    await executeSheetsRequest({
+      method: 'PUT',
+      endpoint: `${REPO_CONFIG.spreadsheetId}/values/${encodeURIComponent(tabName + '!' + colLetter + rowNum)}`,
+      params: { valueInputOption: 'USER_ENTERED' },
+      body: { range: `${tabName}!${colLetter}${rowNum}`, majorDimension: 'ROWS', values: [['false']] }
+    });
+
+    return { success: true, accountId: cleanId, archived: true };
+  });
 }
 
 /**
@@ -1398,6 +1589,125 @@ async function getBudgetEnvelopes() {
       budgetStatus: pctConsumed > 100 ? 'OVER_BUDGET' : pctConsumed >= 90 ? 'NEAR_LIMIT' : 'ON_TRACK',
       isFixedObligation: String(b.is_fixed_obligation).toLowerCase() === 'true'
     };
+  });
+}
+
+/**
+ * Create or update a monthly budget allocation envelope in fct_budget_allocations
+ */
+async function upsertBudgetAllocation(allocationData) {
+  if (!allocationData || !allocationData.categoryId || !allocationData.allocationMonth) {
+    throw new Error('categoryId and allocationMonth are required');
+  }
+
+  const cleanMonth = String(allocationData.allocationMonth).trim();
+  const cleanCatId = String(allocationData.categoryId).trim();
+  const plannedAmount = parseFloat(allocationData.plannedAmount || 0);
+
+  if (isNaN(plannedAmount) || plannedAmount < 0) {
+    throw new Error('Planned amount must be a non-negative number');
+  }
+
+  return repositoryMutex.runExclusive(async () => {
+    const tabName = REPO_CONFIG.budgetsTab;
+    const { headers, objects } = await fetchSheetObjects(tabName);
+    const activeHeaders = headers.length > 0 ? headers : SCHEMAS.fct_budget_allocations;
+
+    const targetCurrency = (allocationData.targetCurrency || 'ZAR').toUpperCase();
+    const plannedZar = targetCurrency === 'ZAR' ? plannedAmount : plannedAmount * DEFAULT_EXCHANGE_RATES.USD_TO_ZAR;
+    const plannedUsd = targetCurrency === 'USD' ? plannedAmount : plannedAmount * DEFAULT_EXCHANGE_RATES.ZAR_TO_USD;
+
+    const existing = objects.find(
+      (b) => String(b.allocation_month).trim() === cleanMonth && String(b.category_id).trim() === cleanCatId
+    );
+
+    if (existing) {
+      const rowNum = existing._sheetRowNumber;
+      const plannedColIdx = headers.indexOf('planned_amount');
+      const plannedZarIdx = headers.indexOf('planned_amount_zar');
+      const plannedUsdIdx = headers.indexOf('planned_amount_usd');
+      const notesIdx = headers.indexOf('notes');
+
+      if (plannedColIdx !== -1) {
+        await executeSheetsRequest({
+          method: 'PUT',
+          endpoint: `${REPO_CONFIG.spreadsheetId}/values/${encodeURIComponent(tabName + '!' + colToA1(plannedColIdx) + rowNum)}`,
+          params: { valueInputOption: 'USER_ENTERED' },
+          body: { range: `${tabName}!${colToA1(plannedColIdx)}${rowNum}`, majorDimension: 'ROWS', values: [[plannedAmount.toFixed(2)]] }
+        });
+      }
+      if (plannedZarIdx !== -1) {
+        await executeSheetsRequest({
+          method: 'PUT',
+          endpoint: `${REPO_CONFIG.spreadsheetId}/values/${encodeURIComponent(tabName + '!' + colToA1(plannedZarIdx) + rowNum)}`,
+          params: { valueInputOption: 'USER_ENTERED' },
+          body: { range: `${tabName}!${colToA1(plannedZarIdx)}${rowNum}`, majorDimension: 'ROWS', values: [[plannedZar.toFixed(2)]] }
+        });
+      }
+      if (plannedUsdIdx !== -1) {
+        await executeSheetsRequest({
+          method: 'PUT',
+          endpoint: `${REPO_CONFIG.spreadsheetId}/values/${encodeURIComponent(tabName + '!' + colToA1(plannedUsdIdx) + rowNum)}`,
+          params: { valueInputOption: 'USER_ENTERED' },
+          body: { range: `${tabName}!${colToA1(plannedUsdIdx)}${rowNum}`, majorDimension: 'ROWS', values: [[plannedUsd.toFixed(2)]] }
+        });
+      }
+      if (notesIdx !== -1 && allocationData.notes !== undefined) {
+        await executeSheetsRequest({
+          method: 'PUT',
+          endpoint: `${REPO_CONFIG.spreadsheetId}/values/${encodeURIComponent(tabName + '!' + colToA1(notesIdx) + rowNum)}`,
+          params: { valueInputOption: 'USER_ENTERED' },
+          body: { range: `${tabName}!${colToA1(notesIdx)}${rowNum}`, majorDimension: 'ROWS', values: [[String(allocationData.notes || '')]] }
+        });
+      }
+
+      return {
+        success: true,
+        action: 'UPDATED',
+        allocation: {
+          allocationMonth: cleanMonth,
+          categoryId: cleanCatId,
+          targetCurrency,
+          plannedAmount,
+          plannedAmountZar: parseFloat(plannedZar.toFixed(2)),
+          plannedAmountUsd: parseFloat(plannedUsd.toFixed(2))
+        }
+      };
+    } else {
+      const row = serializeBudgetRow({
+        allocationMonth: cleanMonth,
+        categoryId: cleanCatId,
+        cashFlowTier: allocationData.cashFlowTier || 'DAILY_SPENDING',
+        targetCurrency,
+        plannedAmount,
+        plannedAmountUsd: parseFloat(plannedUsd.toFixed(2)),
+        plannedAmountZar: parseFloat(plannedZar.toFixed(2)),
+        rolloverFromPrior: parseFloat(allocationData.rolloverFromPrior || 0),
+        isFixedObligation: allocationData.isFixedObligation ? 'true' : 'false',
+        notes: allocationData.notes || ''
+      }, activeHeaders);
+
+      const endpoint = `${REPO_CONFIG.spreadsheetId}/values/${encodeURIComponent(tabName + '!A1')}:append`;
+      await executeSheetsRequest({
+        method: 'POST',
+        endpoint,
+        params: { valueInputOption: 'USER_ENTERED', insertDataOption: 'INSERT_ROWS' },
+        body: { range: `${tabName}!A1`, majorDimension: 'ROWS', values: [row] }
+      });
+
+      return {
+        success: true,
+        action: 'CREATED',
+        allocation: {
+          allocationMonth: cleanMonth,
+          categoryId: cleanCatId,
+          targetCurrency,
+          plannedAmount,
+          plannedAmountZar: parseFloat(plannedZar.toFixed(2)),
+          plannedAmountUsd: parseFloat(plannedUsd.toFixed(2))
+        }
+      };
+    }
   });
 }
 
@@ -1498,6 +1808,73 @@ async function getDailyBurnMetrics(days = 14) {
       burnAlertStatus: (avgZar > 0 && spendZar / avgZar > 1.3) ? 'ELEVATED' : 'NORMAL'
     };
   });
+}
+
+/**
+ * Fetch unified burn rate summary and predictive runway grounded in actual accounts & transactions
+ */
+async function getBurnRateSummary(days = 14) {
+  const [history, accounts, envelopes] = await Promise.all([
+    getDailyBurnMetrics(days),
+    getAccounts(),
+    getBudgetEnvelopes()
+  ]);
+
+  // Liquid reserves: Tier 1 Daily + Tier 2 Monthly Allocation in ZAR
+  let liquidReserveBalanceZar = 0;
+  for (const acc of accounts) {
+    if (acc.cashFlowTier === 'DAILY_SPENDING' || acc.cashFlowTier === 'MONTHLY_ALLOCATION') {
+      const native = typeof acc.nativeBalance === 'number' ? acc.nativeBalance : parseFloat(acc.nativeBalance || 0);
+      let zarVal = native;
+      if (acc.primaryCurrency === 'USD') zarVal = native * DEFAULT_EXCHANGE_RATES.USD_TO_ZAR;
+      else if (acc.primaryCurrency === 'ZiG') zarVal = native / (DEFAULT_EXCHANGE_RATES.ZAR_TO_ZIG_PARALLEL || 1.35);
+      liquidReserveBalanceZar += zarVal;
+    }
+  }
+
+  // Calculate average daily burn from real transaction history (zero if no history; no hardcoded 650)
+  let averageDailyBurnZar = 0;
+  if (history.length > 0) {
+    const totalDaily = history.reduce((sum, h) => sum + (h.dailySpendZar || 0), 0);
+    averageDailyBurnZar = Math.round(totalDaily / history.length);
+  }
+
+  const discretionaryDailySpendZar = averageDailyBurnZar;
+
+  // Monthly fixed commitments from envelopes
+  const monthlyFixedCommitmentsZar = envelopes
+    .filter((e) => e.isFixedObligation)
+    .reduce((sum, e) => sum + (e.plannedAmountZar || 0), 0);
+
+  // Safe runway calculations: handle zero burn, negative reserves, no history
+  const baselineRunwayDays = (averageDailyBurnZar > 0 && liquidReserveBalanceZar > 0)
+    ? Math.max(0, Math.floor(liquidReserveBalanceZar / averageDailyBurnZar))
+    : 0;
+
+  const fixedDaily = monthlyFixedCommitmentsZar / 30;
+  const fixedObligationsRunwayDays = (fixedDaily > 0 && liquidReserveBalanceZar > 0)
+    ? Math.max(0, Math.floor(liquidReserveBalanceZar / fixedDaily))
+    : 0;
+
+  const survivalDate = (baselineRunwayDays > 0)
+    ? new Date(Date.now() + baselineRunwayDays * 86400000).toISOString().split('T')[0]
+    : 'N/A';
+
+  const metrics = {
+    liquidReserveBalanceZar: Math.round(liquidReserveBalanceZar),
+    averageDailyBurnZar,
+    baselineRunwayDays,
+    fixedObligationsRunwayDays,
+    survivalDate,
+    discretionaryDailySpendZar,
+    monthlyFixedCommitmentsZar: Math.round(monthlyFixedCommitmentsZar)
+  };
+
+  return {
+    ...metrics,
+    metrics,
+    history
+  };
 }
 
 /**
@@ -1659,22 +2036,30 @@ async function getIncomeStatements(periodType = null) {
  */
 async function getNonOperatingGains() {
   const vaultHoldings = await getVaultHoldings();
-  return vaultHoldings.map((v) => ({
-    accountId: v.accountId,
-    accountName: v.accountName,
-    financialInstitution: v.financialInstitution,
-    countryCode: v.countryCode,
-    primaryCurrency: v.primaryCurrency,
-    accountType: v.accountType,
-    withdrawalNoticeDays: v.withdrawalNoticeDays,
-    currentVaultBalanceNative: v.nativeBalance,
-    currentVaultBalanceZar: v.valuationZar,
-    currentVaultBalanceUsd: v.valuationUsd,
-    gainClassification: 'CAPITAL_APPRECIATION',
-    annualizedYieldPct: 10.5,
-    monthlyProjectedGainZar: parseFloat((v.valuationZar * (0.105 / 12)).toFixed(2)),
-    monthlyProjectedGainUsd: parseFloat((v.valuationUsd * (0.105 / 12)).toFixed(2))
-  }));
+  return vaultHoldings.map((v) => {
+    const yieldPct = typeof v.interestRatePercent === 'number'
+      ? v.interestRatePercent
+      : (typeof v.interestRate === 'number' ? v.interestRate : parseFloat(v.interestRate || 0) || 0);
+    const isConfigured = yieldPct > 0;
+    const effectiveYield = isConfigured ? yieldPct : 0;
+
+    return {
+      accountId: v.accountId,
+      accountName: v.accountName,
+      financialInstitution: v.financialInstitution,
+      countryCode: v.countryCode,
+      primaryCurrency: v.primaryCurrency,
+      accountType: v.accountType,
+      withdrawalNoticeDays: v.withdrawalNoticeDays,
+      currentVaultBalanceNative: v.nativeBalance,
+      currentVaultBalanceZar: v.valuationZar,
+      currentVaultBalanceUsd: v.valuationUsd,
+      gainClassification: isConfigured ? 'INTEREST_YIELD' : 'NO_CONFIGURED_YIELD',
+      annualizedYieldPct: effectiveYield,
+      monthlyProjectedGainZar: parseFloat((v.valuationZar * (effectiveYield / 100 / 12)).toFixed(2)),
+      monthlyProjectedGainUsd: parseFloat((v.valuationUsd * (effectiveYield / 100 / 12)).toFixed(2))
+    };
+  });
 }
 
 /**
@@ -1842,9 +2227,14 @@ module.exports = {
   reopenDebt,
   deleteDebt,
   getAccounts,
+  createAccount,
+  updateAccount,
+  archiveAccount,
   getBudgetEnvelopes,
+  upsertBudgetAllocation,
   getTaxSchedule,
   getDailyBurnMetrics,
+  getBurnRateSummary,
   getVaultHoldings,
   getExchangeRates,
   getIncomeStatements,
@@ -1854,6 +2244,8 @@ module.exports = {
   getTroubleshootingGuidance,
   serializeTransactionRow,
   serializeDebtRow,
+  serializeAccountRow,
+  serializeBudgetRow,
   colToA1,
   a1ToCol
 };
